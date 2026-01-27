@@ -6,7 +6,7 @@ import asyncio
 logger = logging.getLogger(__name__)
 
 class MQTTClient:
-    def __init__(self, broker: str = "test.mosquitto.org", port: int = 1883):
+    def __init__(self, broker: str = "localhost", port: int = 1883):
         self.client = mqtt.Client()
         self.broker = broker
         self.port = port
