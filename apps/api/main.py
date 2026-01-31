@@ -9,10 +9,16 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-class ACCommand(BaseModel):
-    power: bool
-    temperature: int
-    mode: str
+class ACControlParams(BaseModel):
+    power: bool = True
+    temperature: int = 24
+    mode: str = "cool"
+
+class DeviceCommand(BaseModel):
+    zone: str = "living-room"
+    device_type: str = "ac"
+    device_id: str = "daikin-x"
+    params: ACControlParams
 
 @app.on_event("startup")
 async def startup_event():
@@ -24,18 +30,27 @@ async def shutdown_event():
 
 @app.get("/")
 def read_root():
-    return {"Hello": "World", "Status": "MQTT Service Running"}
+    return {"Hello": "Smart Home API", "Status": "MQTT Service Running"}
 
 @app.post("/ac/control")
-def control_ac(command: ACCommand):
+def control_ac(cmd: DeviceCommand):
     """
-    Publishes AC control commands to 'home/ac/control' topic.
+    Sends a control command to a specific device via MQTT.
+    Topic: smart-home/{zone}/{device_type}/{device_id}/command
     """
-    topic = "home/ac/control"
-    payload = command.dict()
-    success = mqtt_client.publish(topic, payload)
+    payload = {
+        "method": "set_state",
+        "params": cmd.params.dict()
+    }
+    
+    success = mqtt_client.send_command(cmd.zone, cmd.device_type, cmd.device_id, payload)
+    
     if success:
-        return {"status": "success", "message": f"Sent command to {topic}", "data": payload}
+        return {
+            "status": "success", 
+            "target": f"{cmd.zone}/{cmd.device_type}/{cmd.device_id}",
+            "command": payload
+        }
     return {"status": "error", "message": "Failed to publish message"}
 
 @app.post("/test/publish")
