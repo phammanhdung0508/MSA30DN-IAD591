@@ -1,6 +1,15 @@
-from fastapi import FastAPI, Body
+from fastapi import FastAPI, Body, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import List
 from mqtt_client import mqtt_client
+from database import (
+    get_latest_device_data, 
+    get_energy_analytics, 
+    get_temp_analytics,
+    get_schedule,
+    save_schedule
+)
 import logging
 
 # Configure logging
@@ -9,10 +18,20 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
+# Enable CORS for frontend communication
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # In production, restrict this to specific domains
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 class ACControlParams(BaseModel):
     power: bool = True
     temperature: int = 24
     mode: str = "cool"
+    fanSpeed: int = 2
 
 class DeviceCommand(BaseModel):
     zone: str = "living-room"
@@ -20,8 +39,13 @@ class DeviceCommand(BaseModel):
     device_id: str = "daikin-x"
     params: ACControlParams
 
+class ScheduleData(BaseModel):
+    schedule: List[List[bool]] # 7x24 grid
+
 @app.on_event("startup")
 async def startup_event():
+    from database import init_db
+    init_db()
     mqtt_client.start()
 
 @app.on_event("shutdown")
@@ -31,6 +55,29 @@ async def shutdown_event():
 @app.get("/")
 def read_root():
     return {"Hello": "Smart Home API", "Status": "MQTT Service Running"}
+
+@app.get("/ac/{device_id}/status")
+def get_ac_status(device_id: str):
+    """
+    Retrieve the latest status of an AC unit from the database.
+    """
+    data = get_latest_device_data(device_id)
+    if data:
+        return data
+    # Return default/mock if no data found yet
+    return {
+        "timestamp": None,
+        "data": {
+            "power": False,
+            "temperature": 24,
+            "currentTemperature": 26.5,
+            "outdoorTemperature": 32.0,
+            "mode": "cool",
+            "fanSpeed": 1,
+            "humidity": 50,
+            "powerUsage": 0
+        }
+    }
 
 @app.post("/ac/control")
 def control_ac(cmd: DeviceCommand):
@@ -51,7 +98,7 @@ def control_ac(cmd: DeviceCommand):
             "target": f"{cmd.zone}/{cmd.device_type}/{cmd.device_id}",
             "command": payload
         }
-    return {"status": "error", "message": "Failed to publish message"}
+    raise HTTPException(status_code=500, detail="Failed to publish message to MQTT broker")
 
 @app.post("/test/publish")
 def test_publish(topic: str, message: dict = Body(...)):
@@ -62,3 +109,25 @@ def test_publish(topic: str, message: dict = Body(...)):
     if success:
         return {"status": "success", "topic": topic, "payload": message}
     return {"status": "error", "message": "Failed to publish"}
+
+# --- New Endpoints ---
+
+@app.get("/analytics/energy/{device_id}")
+def get_energy(device_id: str):
+    return {"data": get_energy_analytics(device_id)}
+
+@app.get("/analytics/temperature/{device_id}")
+def get_temperature(device_id: str):
+    return {"data": get_temp_analytics(device_id)}
+
+@app.get("/schedule/{device_id}")
+def get_device_schedule(device_id: str):
+    schedule = get_schedule(device_id)
+    return {"schedule": schedule}
+
+@app.post("/schedule/{device_id}")
+def save_device_schedule(device_id: str, data: ScheduleData):
+    success = save_schedule(device_id, data.schedule)
+    if success:
+        return {"status": "success"}
+    raise HTTPException(status_code=500, detail="Failed to save schedule")

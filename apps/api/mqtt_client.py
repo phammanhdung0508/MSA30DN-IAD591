@@ -2,6 +2,7 @@ import paho.mqtt.client as mqtt
 import json
 import logging
 import asyncio
+from database import insert_device_data
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,9 @@ class MQTTClient:
             parts = msg.topic.split("/")
             if len(parts) == 5:
                 zone, dev_type, dev_id, msg_type = parts[1], parts[2], parts[3], parts[4]
+                # Save to DB
+                insert_device_data(zone, dev_type, dev_id, msg_type, payload)
+                
                 # Here you can dispatch to different handlers based on msg_type
                 if msg_type == "telemetry":
                     pass # Handle telemetry
