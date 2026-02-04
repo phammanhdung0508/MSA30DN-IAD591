@@ -138,35 +138,35 @@ def get_energy_analytics(device_id: str, days: int = 1):
     finally:
         conn.close()
         
-def get_temp_analytics(device_id: str, days: int = 7):
+def get_temp_analytics(device_id: str, days: int = 1):
     conn = get_db_connection()
     if not conn:
         return []
         
     try:
         cursor = conn.cursor()
-        # Group by Day
+        # Group by Hour for proper time trend
         cursor.execute(f'''
             SELECT 
-                strftime('%w', timestamp) as day_num,
-                strftime('%Y-%m-%d', timestamp) as date_str,
+                strftime('%Y-%m-%d %H:00', timestamp) as time_bucket,
                 AVG(json_extract(payload, '$.temperature')) as avg_indoor
             FROM device_data
             WHERE device_id = ?
               AND timestamp >= datetime('now', '-{days} days')
-            GROUP BY date_str, day_num
-            ORDER BY date_str ASC
+            GROUP BY time_bucket
+            ORDER BY time_bucket ASC
         ''', (device_id,))
         
         rows = cursor.fetchall()
-        week_map = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
         result = []
         for row in rows:
-            day_str = week_map[int(row['day_num'])]
+            # Format time as HH:mm
+            # time_bucket is "YYYY-MM-DD HH:00"
+            time_str = row['time_bucket'][11:16] 
+            
             result.append({
-                "time": day_str,
+                "time": time_str,
                 "indoor": round(row['avg_indoor'] or 0, 1),
-                "outdoor": 32 # Hardcode or fetch if available
             })
         return result
     except Exception as e:

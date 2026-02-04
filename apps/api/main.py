@@ -56,27 +56,56 @@ async def shutdown_event():
 def read_root():
     return {"Hello": "Smart Home API", "Status": "MQTT Service Running"}
 
+# In-memory state store to persist command state (Power, Mode, etc.) since sensor only sends Telemetry
+DEVICE_STATES = {}
+
 @app.get("/ac/{device_id}/status")
 def get_ac_status(device_id: str):
     """
     Retrieve the latest status of an AC unit from the database.
     """
-    data = get_latest_device_data(device_id)
-    if data:
-        return data
+    db_result = get_latest_device_data(device_id)
+    
+    # Base state from memory (or default)
+    base_state = DEVICE_STATES.get(device_id, {
+        "power": False,
+        "temperature": 24, # Target temp
+        "currentTemperature": 24, # Sensor temp
+        "outdoorTemperature": 32.0,
+        "mode": "cool",
+        "fanSpeed": 2,
+        "humidity": 50,
+        "powerUsage": 0
+    })
+    
+    # Create a copy to return
+    img_state = base_state.copy()
+
+    if db_result:
+        # payload from DB
+        payload = db_result.get("data", {})
+        
+        # Merge payload into default state
+        # Map specific sensor fields if needed
+        if "temperature" in payload:
+            img_state["currentTemperature"] = payload["temperature"] 
+        if "humidity" in payload:
+            img_state["humidity"] = payload["humidity"]
+            
+        # If payload contains state (from other sources)
+        if "power" in payload: img_state["power"] = payload["power"]
+        if "mode" in payload: img_state["mode"] = payload["mode"]
+        if "fanSpeed" in payload: img_state["fanSpeed"] = payload["fanSpeed"]
+        
+        return {
+            "timestamp": db_result.get("timestamp"),
+            "data": img_state
+        }
+
     # Return default/mock if no data found yet
     return {
         "timestamp": None,
-        "data": {
-            "power": False,
-            "temperature": 24,
-            "currentTemperature": 26.5,
-            "outdoorTemperature": 32.0,
-            "mode": "cool",
-            "fanSpeed": 1,
-            "humidity": 50,
-            "powerUsage": 0
-        }
+        "data": img_state
     }
 
 @app.post("/ac/control")
@@ -89,6 +118,20 @@ def control_ac(cmd: DeviceCommand):
         "method": "set_state",
         "params": cmd.params.dict()
     }
+    
+    # Update memory state to persist command
+    current = DEVICE_STATES.get(cmd.device_id, {
+        "power": False,
+        "temperature": 24,
+        "mode": "cool",
+        "fanSpeed": 2,
+        "currentTemperature": 24, # Sensor temp
+        "outdoorTemperature": 32.0,
+        "humidity": 50,
+        "powerUsage": 0
+    })
+    current.update(cmd.params.dict())
+    DEVICE_STATES[cmd.device_id] = current
     
     success = mqtt_client.send_command(cmd.zone, cmd.device_type, cmd.device_id, payload)
     

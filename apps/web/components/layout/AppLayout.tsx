@@ -9,12 +9,13 @@ import {
     Leaf,
     Sparkles,
     Home,
-    LogOut
+    LogOut,
+    Mic
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 
-export type ViewType = "dashboard" | "analytics" | "schedule" | "settings";
+export type ViewType = "dashboard" | "analytics" | "schedule" | "settings" | "wake";
 
 interface AppLayoutProps {
     children: React.ReactNode;
@@ -27,6 +28,7 @@ export function AppLayout({ children, currentView, onNavigate }: AppLayoutProps)
         { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
         { id: "analytics", label: "Analytics", icon: BarChart3 },
         { id: "schedule", label: "Smart Schedule", icon: CalendarClock },
+        { id: "wake", label: "Wake Lab", icon: Mic },
         { id: "settings", label: "Settings", icon: Settings },
     ];
 

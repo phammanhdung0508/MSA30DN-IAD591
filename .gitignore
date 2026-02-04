@@ -65,3 +65,12 @@ venv/
 
 # JetBrains
 .idea/
+
+# IoT / ESP32
+.pio/
+managed_components/
+**/*.bin
+**/*.elf
+**/*.map
+sdkconfig.old
+

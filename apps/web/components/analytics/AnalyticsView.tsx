@@ -18,25 +18,23 @@ const energyData = [
     { time: "23:59", active: 1.5, idle: 0.2 },
 ];
 
-const tempData = [
-    { time: "Mon", indoor: 24, outdoor: 30 },
-    { time: "Tue", indoor: 23, outdoor: 32 },
-    { time: "Wed", indoor: 25, outdoor: 29 },
-    { time: "Thu", indoor: 24, outdoor: 31 },
-    { time: "Fri", indoor: 22, outdoor: 33 },
-    { time: "Sat", indoor: 23, outdoor: 30 },
-    { time: "Sun", indoor: 24, outdoor: 29 },
-];
+// Mock data removed
 
 export function AnalyticsView() {
     const [tempData, setTempData] = React.useState<any[]>([]);
 
     React.useEffect(() => {
         const loadData = async () => {
-            const temp = await getTempAnalytics();
-            setTempData(temp);
+            try {
+                const temp = await getTempAnalytics();
+                setTempData(temp);
+            } catch (e) {
+                console.error("Failed to load analytics", e);
+            }
         };
         loadData();
+        const interval = setInterval(loadData, 5000); // Update every 5s
+        return () => clearInterval(interval);
     }, []);
 
     return (
@@ -49,19 +47,24 @@ export function AnalyticsView() {
             {/* Charts */}
             <div className="grid grid-cols-1 gap-6">
                 <GlassCard className="p-6 h-[500px]">
-                    <h3 className="text-lg font-bold text-white mb-6">Temperature Trends (Avg 7 Days)</h3>
+                    <h3 className="text-lg font-bold text-white mb-6">Temperature Trends</h3>
                     <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={tempData}>
+                        <AreaChart data={tempData}>
+                            <defs>
+                                <linearGradient id="colorIndoor" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8} />
+                                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                                </linearGradient>
+                            </defs>
                             <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
                             <XAxis dataKey="time" stroke="#94a3b8" />
-                            <YAxis stroke="#94a3b8" unit="°C" />
+                            <YAxis stroke="#94a3b8" unit="°C" domain={['auto', 'auto']} />
                             <Tooltip
-                                cursor={{ fill: 'transparent' }}
-                                contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }}
+                                cursor={{ stroke: '#ffffff20' }}
+                                contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#fff' }}
                             />
-                            <Bar dataKey="indoor" name="Indoor Temp" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                            <Bar dataKey="outdoor" name="Outdoor Temp" fill="#64748b" radius={[4, 4, 0, 0]} />
-                        </BarChart>
+                            <Area type="monotone" dataKey="indoor" name="Indoor Temp" stroke="#3b82f6" fillOpacity={1} fill="url(#colorIndoor)" />
+                        </AreaChart>
                     </ResponsiveContainer>
                 </GlassCard>
             </div>
