@@ -8,9 +8,9 @@ type MqttStatus = "disconnected" | "connecting" | "connected" | "error";
 type StreamStatus = "idle" | "connecting" | "streaming" | "error";
 
 const DEFAULT_WAKE_PHRASE = "hey esp";
-const DEFAULT_MQTT_URL = "wss://broker.hivemq.com:8884/mqtt";
-const DEFAULT_MQTT_TOPIC = "sensor/wake_trigger_msa_assign1";
-const DEFAULT_WS_URL = "ws://localhost:8080";
+const DEFAULT_MQTT_URL = process.env.NEXT_PUBLIC_MQTT_WS_URL || "wss://localhost:8884/mqtt";
+const DEFAULT_MQTT_TOPIC = process.env.NEXT_PUBLIC_MQTT_TOPIC || "sensor/wake_trigger_msa_assign1";
+const DEFAULT_WS_URL = process.env.NEXT_PUBLIC_AUDIO_BRIDGE_URL || "ws://localhost:8080";
 
 export function WakeLab() {
     const [mqttUrl, setMqttUrl] = useState(DEFAULT_MQTT_URL);

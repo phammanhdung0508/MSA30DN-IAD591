@@ -128,7 +128,10 @@ export default function SimulationPage() {
                 {/* HUD Info */}
                 <div className="absolute top-4 left-4 p-4 bg-black/50 backdrop-blur-md rounded-xl text-white border border-white/10">
                     <h2 className="text-xl font-bold">Living Room</h2>
-                    <div className="text-4xl font-light mt-2">{temp}°C</div>
+                    <div className="text-4xl font-light mt-2">
+                        {temp}
+                        {"\u00B0C"}
+                    </div>
                     <div className="text-sm text-gray-400 mt-1">Current Temperature</div>
                 </div>
             </div>
@@ -187,7 +190,10 @@ export default function SimulationPage() {
                             className="w-12 h-12 rounded-full bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-white text-xl font-bold transition-colors"
                         >-</button>
                         <div className="text-center">
-                            <div className="text-3xl font-bold text-white">{temp}°</div>
+                            <div className="text-3xl font-bold text-white">
+                                {temp}
+                                {"\u00B0"}
+                            </div>
                             <div className="text-xs text-slate-400">Target Temp</div>
                         </div>
                         <button

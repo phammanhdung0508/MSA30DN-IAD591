@@ -1,6 +1,7 @@
 #include <string.h>
 #include <math.h>
 
+#include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/ringbuf.h"
@@ -16,9 +17,11 @@
 #include "nvs_flash.h"
 
 #include "driver/gpio.h"
+#include "driver/adc.h"
 #include "driver/i2s.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
+#include "esp_rom_sys.h"
 
 extern "C" {
 #include "esp_afe_sr_iface.h"
@@ -29,13 +32,16 @@ extern "C" {
 
 static const char *TAG = "smart_home_mqtt";
 
-static const char *WIFI_SSID = "FSB-202";
-static const char *WIFI_PASS = "123@123a";
+static const char *WIFI_SSID = CONFIG_SMART_HOME_WIFI_SSID;
+static const char *WIFI_PASS = CONFIG_SMART_HOME_WIFI_PASSWORD;
 
-static const char *MQTT_BROKER = "mqtt://broker.hivemq.com";
-static const char *MQTT_TOPIC = "sensor/temp_humid_msa_assign1";
-static const char *MQTT_CONTROL_TOPIC = "sensor/control_msa_assign1";
-static const char *MQTT_WAKE_TOPIC = "sensor/wake_trigger_msa_assign1";
+static const char *MQTT_BROKER = CONFIG_SMART_HOME_MQTT_BROKER_URI;
+static const char *MQTT_TOPIC = CONFIG_SMART_HOME_MQTT_TOPIC_SENSOR;
+static const char *MQTT_CONTROL_TOPIC = CONFIG_SMART_HOME_MQTT_TOPIC_CONTROL;
+static const char *MQTT_WAKE_TOPIC = CONFIG_SMART_HOME_MQTT_TOPIC_WAKE;
+
+static const char *MQTT_USERNAME = CONFIG_SMART_HOME_MQTT_USERNAME;
+static const char *MQTT_PASSWORD = CONFIG_SMART_HOME_MQTT_PASSWORD;
 
 #define AUDIO_SOURCE_UDP 1
 #define AUDIO_SOURCE_I2S 0
@@ -66,6 +72,7 @@ static esp_afe_sr_data_t *afe_data = NULL;
 static RingbufHandle_t audio_ringbuf = NULL;
 static volatile int64_t last_udp_us = 0;
 static volatile bool remote_wake_pending = false;
+static volatile float latest_noise_level = 0.0f;
 
 static void setup_i2s(void) {
     const i2s_config_t i2s_config = {
@@ -93,6 +100,104 @@ static void setup_i2s(void) {
     i2s_set_pin(I2S_PORT, &pin_config);
 }
 
+static bool wifi_config_valid(void) {
+    return WIFI_SSID && WIFI_PASS && strlen(WIFI_SSID) > 0 && strlen(WIFI_PASS) > 0;
+}
+
+static bool wait_for_gpio_level(int level, int timeout_us) {
+    int64_t start = esp_timer_get_time();
+    while (gpio_get_level((gpio_num_t)DHTPIN) != level) {
+        if ((esp_timer_get_time() - start) > timeout_us) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool read_dht22(float *temperature, float *humidity) {
+    if (!temperature || !humidity) {
+        return false;
+    }
+
+    gpio_set_direction((gpio_num_t)DHTPIN, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)DHTPIN, 0);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    gpio_set_level((gpio_num_t)DHTPIN, 1);
+    esp_rom_delay_us(40);
+    gpio_set_direction((gpio_num_t)DHTPIN, GPIO_MODE_INPUT);
+    gpio_set_pull_mode((gpio_num_t)DHTPIN, GPIO_PULLUP_ONLY);
+
+    if (!wait_for_gpio_level(0, 80) || !wait_for_gpio_level(1, 80)) {
+        return false;
+    }
+
+    uint8_t data[5] = {0};
+    for (int i = 0; i < 40; i++) {
+        if (!wait_for_gpio_level(0, 60)) {
+            return false;
+        }
+        if (!wait_for_gpio_level(1, 60)) {
+            return false;
+        }
+        esp_rom_delay_us(40);
+        int bit = gpio_get_level((gpio_num_t)DHTPIN);
+        data[i / 8] <<= 1;
+        if (bit) {
+            data[i / 8] |= 1;
+        }
+        if (!wait_for_gpio_level(0, 80)) {
+            return false;
+        }
+    }
+
+    uint8_t checksum = data[0] + data[1] + data[2] + data[3];
+    if (checksum != data[4]) {
+        return false;
+    }
+
+    uint16_t raw_h = ((uint16_t)data[0] << 8) | data[1];
+    uint16_t raw_t = ((uint16_t)data[2] << 8) | data[3];
+    *humidity = raw_h / 10.0f;
+    if (raw_t & 0x8000) {
+        raw_t &= 0x7FFF;
+        *temperature = -((float)raw_t) / 10.0f;
+    } else {
+        *temperature = raw_t / 10.0f;
+    }
+
+    return true;
+}
+
+static void init_adc(void) {
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    adc1_config_channel_atten((adc1_channel_t)CONFIG_SMART_HOME_MQ_ADC_CHANNEL, ADC_ATTEN_DB_11);
+}
+
+static int read_gas_raw(void) {
+    int sum = 0;
+    for (int i = 0; i < 4; i++) {
+        sum += adc1_get_raw((adc1_channel_t)CONFIG_SMART_HOME_MQ_ADC_CHANNEL);
+    }
+    return sum / 4;
+}
+
+static void update_noise_level(const int16_t *samples, int count) {
+    if (!samples || count <= 0) {
+        return;
+    }
+    double sum = 0.0;
+    for (int i = 0; i < count; i++) {
+        int32_t s = samples[i];
+        sum += (double)s * (double)s;
+    }
+    double mean = sum / count;
+    double rms = sqrt(mean);
+    double normalized = rms / 32768.0;
+    if (normalized < 0.0) normalized = 0.0;
+    if (normalized > 1.0) normalized = 1.0;
+    latest_noise_level = (float)(normalized * 100.0);
+}
+
 static void trigger_wake_event(const char *source) {
     if (mqtt_client) {
         char payload[96];
@@ -115,7 +220,12 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     }
 }
 
-static void wifi_init_sta(void) {
+static bool wifi_init_sta(void) {
+    if (!wifi_config_valid()) {
+        ESP_LOGE(TAG, "WiFi credentials not set. Configure SMART_HOME_WIFI_SSID/PASSWORD.");
+        return false;
+    }
+
     wifi_event_group = xEventGroupCreate();
     esp_netif_init();
     esp_event_loop_create_default();
@@ -130,8 +240,10 @@ static void wifi_init_sta(void) {
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, &instance_got_ip);
 
     wifi_config_t wifi_config = {};
-    strncpy((char *)wifi_config.sta.ssid, WIFI_SSID, sizeof(wifi_config.sta.ssid));
-    strncpy((char *)wifi_config.sta.password, WIFI_PASS, sizeof(wifi_config.sta.password));
+    strncpy((char *)wifi_config.sta.ssid, WIFI_SSID, sizeof(wifi_config.sta.ssid) - 1);
+    wifi_config.sta.ssid[sizeof(wifi_config.sta.ssid) - 1] = '\0';
+    strncpy((char *)wifi_config.sta.password, WIFI_PASS, sizeof(wifi_config.sta.password) - 1);
+    wifi_config.sta.password[sizeof(wifi_config.sta.password) - 1] = '\0';
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
     esp_wifi_set_mode(WIFI_MODE_STA);
@@ -139,6 +251,7 @@ static void wifi_init_sta(void) {
     esp_wifi_start();
 
     xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+    return true;
 }
 
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
@@ -169,8 +282,18 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 }
 
 static void mqtt_start(void) {
+    if (!MQTT_BROKER || strlen(MQTT_BROKER) == 0) {
+        ESP_LOGE(TAG, "MQTT broker URI not set. Configure SMART_HOME_MQTT_BROKER_URI.");
+        return;
+    }
     esp_mqtt_client_config_t mqtt_cfg = {};
     mqtt_cfg.broker.address.uri = MQTT_BROKER;
+    if (MQTT_USERNAME && strlen(MQTT_USERNAME) > 0) {
+        mqtt_cfg.credentials.username = MQTT_USERNAME;
+    }
+    if (MQTT_PASSWORD && strlen(MQTT_PASSWORD) > 0) {
+        mqtt_cfg.credentials.authentication.password = MQTT_PASSWORD;
+    }
 
     mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(mqtt_client, MQTT_EVENT_ANY, mqtt_event_handler, NULL);
@@ -287,6 +410,7 @@ static void audio_feed_task(void *pvParameters) {
 #endif
 
         if (bytesRead > 0) {
+            update_noise_level(feed_buff, feed_chunksize);
             afe_handle->feed(afe_data, feed_buff);
             afe_fetch_result_t *res = afe_handle->fetch(afe_data);
             if (res && res->wakeup_state == WAKENET_DETECTED) {
@@ -301,7 +425,7 @@ static void audio_feed_task(void *pvParameters) {
 static void app_task(void *pvParameters) {
     gpio_set_direction((gpio_num_t)LED_PIN, GPIO_MODE_OUTPUT);
     gpio_set_direction((gpio_num_t)BUZZER_PIN, GPIO_MODE_OUTPUT);
-    gpio_set_direction((gpio_num_t)MQ_PIN, GPIO_MODE_INPUT);
+    init_adc();
 
 #if AUDIO_SOURCE_I2S
     setup_i2s();
@@ -316,11 +440,26 @@ static void app_task(void *pvParameters) {
 #endif
     xTaskCreate(audio_feed_task, "audio_feed_task", 4096, NULL, 5, NULL);
 
+    static float last_temperature = NAN;
+    static float last_humidity = NAN;
+    static int last_gas = 0;
+
     while (true) {
-        float humidity = 0.0f;
-        float temperature = 0.0f;
-        int gasValue = 0;
-        float noiseLevel = 0;
+        float temperature = last_temperature;
+        float humidity = last_humidity;
+        int gasValue = last_gas;
+        float noiseLevel = latest_noise_level;
+
+        if (read_dht22(&temperature, &humidity)) {
+            last_temperature = temperature;
+            last_humidity = humidity;
+        } else {
+            if (isnan(temperature)) temperature = 0.0f;
+            if (isnan(humidity)) humidity = 0.0f;
+        }
+
+        gasValue = read_gas_raw();
+        last_gas = gasValue;
 
         if (remote_wake_pending) {
             remote_wake_pending = false;
@@ -347,6 +486,9 @@ static void app_task(void *pvParameters) {
 
 extern "C" void app_main(void) {
     nvs_flash_init();
-    wifi_init_sta();
+    if (!wifi_init_sta()) {
+        ESP_LOGE(TAG, "WiFi init failed. Aborting.");
+        return;
+    }
     xTaskCreate(app_task, "app_task", 8192, NULL, 5, NULL);
 }

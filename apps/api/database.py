@@ -39,6 +39,9 @@ def init_db():
         finally:
             conn.close()
 
+def _empty_schedule():
+    return [[False for _ in range(24)] for _ in range(7)]
+
 def insert_device_data(zone, device_type, device_id, message_type, payload):
     conn = get_db_connection()
     if conn:
@@ -180,7 +183,7 @@ def get_temp_analytics(device_id: str, days: int = 1):
 def get_schedule(device_id: str):
     conn = get_db_connection()
     if not conn:
-        return []
+        return _empty_schedule()
     try:
         cursor = conn.cursor()
         cursor.execute('''
@@ -191,8 +194,7 @@ def get_schedule(device_id: str):
         rows = cursor.fetchall()
         
         # Transform to 7x24 grid
-        # Initialize empty grid
-        grid = [[False for _ in range(24)] for _ in range(7)]
+        grid = _empty_schedule()
         
         for row in rows:
             d = row['day_of_week']
@@ -201,6 +203,9 @@ def get_schedule(device_id: str):
                 grid[d][h] = bool(row['is_active'])
                 
         return grid
+    except Exception as e:
+        logger.error(f"Get schedule error: {e}")
+        return _empty_schedule()
     finally:
         conn.close()
 

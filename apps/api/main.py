@@ -42,6 +42,14 @@ class DeviceCommand(BaseModel):
 class ScheduleData(BaseModel):
     schedule: List[List[bool]] # 7x24 grid
 
+def _is_valid_schedule_grid(grid: List[List[bool]]) -> bool:
+    if not isinstance(grid, list) or len(grid) != 7:
+        return False
+    for day in grid:
+        if not isinstance(day, list) or len(day) != 24:
+            return False
+    return True
+
 @app.on_event("startup")
 async def startup_event():
     from database import init_db
@@ -170,6 +178,8 @@ def get_device_schedule(device_id: str):
 
 @app.post("/schedule/{device_id}")
 def save_device_schedule(device_id: str, data: ScheduleData):
+    if not _is_valid_schedule_grid(data.schedule):
+        raise HTTPException(status_code=400, detail="Schedule must be a 7x24 boolean grid")
     success = save_schedule(device_id, data.schedule)
     if success:
         return {"status": "success"}

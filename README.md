@@ -2,7 +2,7 @@
 
 A comprehensive Smart Home solution integrating a Next.js frontend, FastAPI backend, and Arduino-based IoT devices using MQTT communication.
 
-## 🏗 Project Structure
+## Project Structure
 
 This monorepo contains:
 
@@ -14,21 +14,21 @@ This monorepo contains:
   - Features: MQTT connectivity, reading DHT sensors (Temp/Humidity), Actuator control (LED/Buzzer).
 - **`packages/db`**: Shared SQLite database location.
 
-## 🚀 Features
+## Features
 
 - **Real-time Monitoring**: Live display of Temperature and Humidity from IoT sensors.
 - **Remote Control**: Toggle AC power, change modes (Cool/Heat/Dry/Fan), and adjust Fan Speed.
 - **Analytics**: Visualization of temperature trends over the last 24 hours.
 - **Automated Communication**: Seamless synchronization between Web Dashboard and Hardware via MQTT.
 
-## 🛠 Tech Stack
+## Tech Stack
 
 - **Frontend**: React, Next.js, TailwindCSS, Lucide Icons, Recharts.
 - **Backend**: Python, FastAPI, SQLite3, Paho-MQTT.
 - **Communication Protocol**: MQTT (HiveMQ Public Broker).
 - **Hardware/Simulation**: ESP32 (Wokwi Compatible), DHT22 Sensor.
 
-## ⚙️ Setup & Installation
+## Setup & Installation
 
 ### Prerequisites
 - Node.js (v18+)
@@ -55,7 +55,7 @@ pip install fastapi uvicorn paho-mqtt
 ### 3. Database Setup
 The SQLite database is automatically initialized at `packages/db/smarthome.db` when the API server starts.
 
-## 🏃 Running the Application
+## Running the Application
 
 ### Option 1: Run All (Turbo Mode)
 From the root directory:
@@ -82,15 +82,15 @@ pnpm dev
 - Open `apps/iot/main/smart_home_mqtt/smart_home_mqtt.ino` in Arduino IDE or Wokwi.
 - Ensure the device is connected to WiFi and the configured MQTT Broker.
 
-## 📡 MQTT Configuration
+## MQTT Configuration
 
-- **Broker**: `broker.hivemq.com`
-- **Port**: `1883`
+- **Broker**: Configure via `MQTT_BROKER_URL` (API) and `SMART_HOME_MQTT_BROKER_URI` (ESP32).
+- **Auth**: Optional via `MQTT_USERNAME` / `MQTT_PASSWORD` and `SMART_HOME_MQTT_USERNAME` / `SMART_HOME_MQTT_PASSWORD`.
 - **Topics**:
   - Telemetry (Sensor -> Cloud): `sensor/temp_humid_msa_assign1`
   - Control (Cloud -> Device): `sensor/control_msa_assign1`
 
-## 📊 Database Schema
+## Database Schema
 
 The system uses SQLite. Key tables:
 - `device_data`: Stores telemetry logs (JSON payload) with timestamps.

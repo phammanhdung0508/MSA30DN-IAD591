@@ -67,7 +67,7 @@ export function DashboardMain() {
             <header className="flex justify-between items-end">
                 <div>
                     <h1 className="text-3xl font-bold text-white">Living Room</h1>
-                    <p className="text-slate-400 mt-1">Daikin Model X • Online</p>
+                    <p className="text-slate-400 mt-1">Daikin Model X {"\u2022"} Online</p>
                 </div>
                 {/* Removed redundant header stats */}
             </header>
@@ -103,7 +103,7 @@ export function DashboardMain() {
                                     )}>
                                         {temperature}
                                     </span>
-                                    <span className="text-4xl text-slate-500 mt-2">°</span>
+                                    <span className="text-4xl text-slate-500 mt-2">{"\u00B0"}</span>
                                 </div>
                                 <div className="text-sm text-slate-500 mt-2 font-medium">Target Temp</div>
                             </div>

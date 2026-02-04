@@ -9,10 +9,21 @@ import { getSchedule, saveSchedule } from "@/lib/api";
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
+const createEmptySchedule = () =>
+    Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => false));
+
+const normalizeSchedule = (input: boolean[][]) => {
+    if (!Array.isArray(input) || input.length !== 7) return createEmptySchedule();
+    return input.map((day) => {
+        if (!Array.isArray(day) || day.length !== 24) return Array(24).fill(false);
+        return day.map((v) => Boolean(v));
+    });
+};
+
 export function SmartSchedule() {
     // Simple grid state: [dayIndex][hourIndex] = boolean (isActive)
     const [schedule, setSchedule] = useState<boolean[][]>(
-        Array.from({ length: 7 }, () => Array(24).fill(false))
+        createEmptySchedule()
     );
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -21,7 +32,7 @@ export function SmartSchedule() {
         const load = async () => {
             setIsLoading(true);
             const data = await getSchedule();
-            setSchedule(data);
+            setSchedule(normalizeSchedule(data));
             setIsLoading(false);
         };
         load();
@@ -52,7 +63,7 @@ export function SmartSchedule() {
                 </div>
                 <div className="flex gap-2">
                     <button
-                        onClick={() => setSchedule(Array(7).fill(Array(24).fill(false)))}
+                        onClick={() => setSchedule(createEmptySchedule())}
                         className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition"
                     >
                         <RotateCcw className="w-4 h-4" /> Reset
@@ -114,7 +125,7 @@ export function SmartSchedule() {
                 <div className="mt-8 flex gap-8 items-center justify-center text-sm text-slate-400">
                     <div className="flex items-center gap-2">
                         <div className="w-4 h-4 bg-cyan-500 rounded" />
-                        <span>AC On (22°C Cool)</span>
+                        <span>AC On (22\u00B0C Cool)</span>
                     </div>
                     <div className="flex items-center gap-2">
                         <div className="w-4 h-4 bg-slate-800/50 rounded" />

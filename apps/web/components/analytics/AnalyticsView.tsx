@@ -58,7 +58,7 @@ export function AnalyticsView() {
                             </defs>
                             <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
                             <XAxis dataKey="time" stroke="#94a3b8" />
-                            <YAxis stroke="#94a3b8" unit="°C" domain={['auto', 'auto']} />
+                            <YAxis stroke="#94a3b8" unit="\u00B0C" domain={['auto', 'auto']} />
                             <Tooltip
                                 cursor={{ stroke: '#ffffff20' }}
                                 contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#fff' }}
