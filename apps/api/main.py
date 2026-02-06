@@ -11,9 +11,16 @@ from database import (
     save_schedule
 )
 import logging
+import os
+from dotenv import load_dotenv
+
+from audio_tcp import TcpAudioRecorder
+from whisper_worker import WhisperWorker
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
+load_dotenv()
+
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
@@ -25,6 +32,23 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+whisper_worker = None
+if os.getenv("WHISPER_ENABLED", "1") != "0":
+    whisper_worker = WhisperWorker(
+        model=os.getenv("WHISPER_MODEL", "base"),
+        language=os.getenv("WHISPER_LANGUAGE", "") or None,
+        task=os.getenv("WHISPER_TASK", "transcribe"),
+    )
+
+tcp_recorder = TcpAudioRecorder(
+    host=os.getenv("AUDIO_TCP_HOST", "0.0.0.0"),
+    port=int(os.getenv("AUDIO_TCP_PORT", os.getenv("AUDIO_UDP_PORT", "3334"))),
+    save_dir=os.getenv("AUDIO_SAVE_DIR", "recordings"),
+    sample_rate=int(os.getenv("AUDIO_SAMPLE_RATE", "16000")),
+    silence_timeout_s=float(os.getenv("AUDIO_SILENCE_TIMEOUT_S", "6.0")),
+    whisper_worker=whisper_worker,
 )
 
 class ACControlParams(BaseModel):
@@ -55,10 +79,13 @@ async def startup_event():
     from database import init_db
     init_db()
     mqtt_client.start()
+    if os.getenv("AUDIO_TCP_ENABLED", "1") != "0":
+        tcp_recorder.start()
 
 @app.on_event("shutdown")
 async def shutdown_event():
     mqtt_client.stop()
+    tcp_recorder.stop()
 
 @app.get("/")
 def read_root():

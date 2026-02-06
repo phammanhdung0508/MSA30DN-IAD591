@@ -1,5 +1,6 @@
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "sdkconfig.h"
@@ -20,6 +21,7 @@
 #include "nvs_flash.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
+#include "lwip/tcp.h"
 
 extern "C" {
 #include "esp_afe_sr_iface.h"
@@ -46,12 +48,20 @@ static const i2c_port_num_t I2C_PORT = I2C_NUM_0;
 static const gpio_num_t I2C_SCL = GPIO_NUM_4;
 static const gpio_num_t I2C_SDA = GPIO_NUM_5;
 static const uint32_t I2C_CLK_HZ = 100000;
+static const gpio_num_t LED_PIN = GPIO_NUM_6;
 
 static const int SAMPLE_RATE = 16000;
+static const int SILENCE_TIMEOUT_MS = 2000;
+static const int MAX_RECORD_MS = 20000;
+static const int LISTENING_ANIM_MS = 500;
+static const int ENERGY_THRESHOLD = 250;
+static const uint32_t UDP_AUDIO_HEADER = 10;
+static const int AUDIO_GAIN_SHIFT = 2; // +12dB (x4)
+static const int UDP_AGG_FRAMES = 3;   // aggregate frames to reduce UDP packet rate
 
 static i2s_chan_handle_t rx_handle = NULL;
-static int udp_sock = -1;
-static struct sockaddr_in udp_target = {};
+static int audio_sock = -1;
+static struct sockaddr_in audio_target = {};
 
 static EventGroupHandle_t wifi_event_group;
 static const int WIFI_CONNECTED_BIT = BIT0;
@@ -125,23 +135,99 @@ static bool wifi_init_sta(void) {
     return true;
 }
 
-static void udp_init(void) {
+static void audio_close_socket(void) {
+    if (audio_sock >= 0) {
+        shutdown(audio_sock, SHUT_RDWR);
+        close(audio_sock);
+        audio_sock = -1;
+    }
+}
+
+static void audio_init(void) {
     if (!AUDIO_UDP_HOST || strlen(AUDIO_UDP_HOST) == 0) {
-        ESP_LOGW(TAG, "AUDIO_UDP_HOST not set, UDP audio disabled");
+        ESP_LOGW(TAG, "AUDIO_UDP_HOST not set, TCP audio disabled");
         return;
     }
 
-    udp_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (udp_sock < 0) {
-        ESP_LOGE(TAG, "Unable to create UDP socket");
-        return;
+    audio_target.sin_family = AF_INET;
+    audio_target.sin_port = htons(AUDIO_UDP_PORT);
+    audio_target.sin_addr.s_addr = inet_addr(AUDIO_UDP_HOST);
+
+    ESP_LOGI(TAG, "TCP audio target: %s:%d", AUDIO_UDP_HOST, AUDIO_UDP_PORT);
+}
+
+static bool audio_connect(void) {
+    if (audio_sock >= 0) {
+        return true;
     }
+    audio_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+    if (audio_sock < 0) {
+        ESP_LOGE(TAG, "Unable to create TCP socket");
+        return false;
+    }
+    int one = 1;
+    setsockopt(audio_sock, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    struct timeval tv = {};
+    tv.tv_sec = 2;
+    tv.tv_usec = 0;
+    setsockopt(audio_sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    setsockopt(audio_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-    udp_target.sin_family = AF_INET;
-    udp_target.sin_port = htons(AUDIO_UDP_PORT);
-    udp_target.sin_addr.s_addr = inet_addr(AUDIO_UDP_HOST);
+    if (connect(audio_sock, (struct sockaddr *)&audio_target, sizeof(audio_target)) != 0) {
+        ESP_LOGW(TAG, "TCP connect failed");
+        audio_close_socket();
+        return false;
+    }
+    return true;
+}
 
-    ESP_LOGI(TAG, "UDP audio target: %s:%d", AUDIO_UDP_HOST, AUDIO_UDP_PORT);
+static bool audio_send_packet(const uint8_t *data, size_t len) {
+    if (!audio_connect()) {
+        return false;
+    }
+    size_t sent = 0;
+    while (sent < len) {
+        int r = send(audio_sock, data + sent, len - sent, 0);
+        if (r <= 0) {
+            ESP_LOGW(TAG, "TCP send failed");
+            audio_close_socket();
+            return false;
+        }
+        sent += r;
+    }
+    return true;
+}
+
+static void tcp_send_start(void) {
+    static const uint8_t msg[] = {'S', 'T', 'R', 'T'};
+    audio_send_packet(msg, sizeof(msg));
+}
+
+static void tcp_send_stop(void) {
+    static const uint8_t msg[] = {'S', 'T', 'O', 'P'};
+    audio_send_packet(msg, sizeof(msg));
+}
+
+static bool tcp_send_audio(const int16_t *pcm, uint16_t bytes, uint32_t seq, uint8_t *scratch, size_t scratch_size) {
+    if (bytes == 0 || !pcm) {
+        return true;
+    }
+    const size_t packet_size = (size_t)bytes + UDP_AUDIO_HEADER;
+    if (!scratch || scratch_size < packet_size) {
+        return false;
+    }
+    scratch[0] = 'A';
+    scratch[1] = 'U';
+    scratch[2] = 'D';
+    scratch[3] = '0';
+    scratch[4] = (uint8_t)(seq & 0xff);
+    scratch[5] = (uint8_t)((seq >> 8) & 0xff);
+    scratch[6] = (uint8_t)((seq >> 16) & 0xff);
+    scratch[7] = (uint8_t)((seq >> 24) & 0xff);
+    scratch[8] = (uint8_t)(bytes & 0xff);
+    scratch[9] = (uint8_t)((bytes >> 8) & 0xff);
+    memcpy(&scratch[10], pcm, bytes);
+    return audio_send_packet(scratch, packet_size);
 }
 
 static esp_err_t i2c_master_init(void) {
@@ -257,6 +343,19 @@ static void lcd_show_status(const char *line1, const char *line2) {
     lcd_write_line(0, line1);
     lcd_write_line(1, line2);
     lcd_unlock();
+}
+
+static void lcd_show_idle(void) {
+    lcd_show_status("WELCOME,", "SAY HI JASON");
+}
+
+static void lcd_show_listening(int dots) {
+    char buf[17];
+    const char *suffix = "...";
+    if (dots == 1) suffix = ".";
+    if (dots == 2) suffix = "..";
+    snprintf(buf, sizeof(buf), "LISTENING%s", suffix);
+    lcd_show_status("SAY COMMAND", buf);
 }
 
 static void lcd_init(void) {
@@ -388,7 +487,10 @@ static void audio_task(void *pvParameters) {
     int feed_chunk = afe_handle->get_feed_chunksize(afe_data);
     int32_t *i2s_buf = (int32_t *)malloc(feed_chunk * sizeof(int32_t));
     int16_t *feed_buf = (int16_t *)malloc(feed_chunk * sizeof(int16_t));
-    if (!i2s_buf || !feed_buf) {
+    int agg_capacity_samples = feed_chunk * UDP_AGG_FRAMES;
+    int16_t *agg_buf = (int16_t *)malloc(agg_capacity_samples * sizeof(int16_t));
+    uint8_t *udp_buf = (uint8_t *)malloc(agg_capacity_samples * sizeof(int16_t) + UDP_AUDIO_HEADER);
+    if (!i2s_buf || !feed_buf || !agg_buf || !udp_buf) {
         ESP_LOGE(TAG, "Audio buffer alloc failed");
         vTaskDelete(NULL);
         return;
@@ -398,6 +500,17 @@ static void audio_task(void *pvParameters) {
     uint32_t timeout_tick = 0;
     static bool showing_wake = false;
     static TickType_t wake_tick = 0;
+    static bool recording = false;
+    static TickType_t record_start_tick = 0;
+    static TickType_t last_lcd_tick = 0;
+    static bool pending_idle = false;
+    static TickType_t pending_idle_tick = 0;
+    static int listening_dots = 0;
+    static uint32_t audio_seq = 0;
+    int agg_samples = 0;
+    int frame_ms = (feed_chunk * 1000) / SAMPLE_RATE;
+    if (frame_ms <= 0) frame_ms = 30;
+    int silence_frames = 0;
 
     while (true) {
         size_t bytes_read = 0;
@@ -418,7 +531,9 @@ static void audio_task(void *pvParameters) {
 
         int samples = bytes_read / (int)sizeof(int32_t);
         for (int i = 0; i < samples; i++) {
-            int32_t s = i2s_buf[i] >> 13; // match INMP411.c scaling
+            int32_t v = i2s_buf[i] >> 8; // 24-bit in 32-bit
+            int32_t s = v >> 8;          // 24-bit -> 16-bit
+            s <<= AUDIO_GAIN_SHIFT;
             if (s > 32767) s = 32767;
             if (s < -32768) s = -32768;
             feed_buf[i] = (int16_t)s;
@@ -429,31 +544,140 @@ static void audio_task(void *pvParameters) {
 
         afe_handle->feed(afe_data, feed_buf);
         afe_fetch_result_t *res = afe_handle->fetch(afe_data);
+        TickType_t now = xTaskGetTickCount();
         if (res && res->wakeup_state == WAKENET_DETECTED) {
             ESP_LOGI(TAG, "Wake word detected!");
-            lcd_show_status("WAKE WORD", "DETECTED");
+            lcd_show_status("WAKE WORD,", "DETECTED");
             showing_wake = true;
-            wake_tick = xTaskGetTickCount();
+            wake_tick = now;
+            if (!recording) {
+                if (!audio_connect()) {
+                    lcd_show_status("NET ERROR", "TCP CONNECT");
+                    pending_idle = true;
+                    pending_idle_tick = now;
+                    gpio_set_level(LED_PIN, 0);
+                    continue;
+                }
+                recording = true;
+                record_start_tick = now;
+                silence_frames = 0;
+                pending_idle = false;
+                tcp_send_start();
+                gpio_set_level(LED_PIN, 1);
+            } else {
+            }
         }
 
-        if (showing_wake && (xTaskGetTickCount() - wake_tick) > pdMS_TO_TICKS(2000)) {
-            lcd_show_status("SMART HOME", "LISTENING...");
+        if (showing_wake && (now - wake_tick) > pdMS_TO_TICKS(800)) {
             showing_wake = false;
+            last_lcd_tick = 0;
+        }
+
+        if (res) {
+            bool energy_speech = false;
+            const int16_t *energy_src = res->data ? res->data : feed_buf;
+            int energy_samples = res->data ? (res->data_size / (int)sizeof(int16_t)) : feed_chunk;
+            if (energy_samples > 0) {
+                int64_t acc = 0;
+                int step = 4;
+                int count = energy_samples / step;
+                if (count <= 0) {
+                    step = 1;
+                    count = energy_samples;
+                }
+                for (int i = 0; i < energy_samples; i += step) {
+                    int32_t s = energy_src[i];
+                    if (s < 0) s = -s;
+                    acc += s;
+                }
+                int avg = (int)(acc / count);
+                energy_speech = avg > ENERGY_THRESHOLD;
+            }
+            if (res->vad_state == VAD_SPEECH || energy_speech) {
+                silence_frames = 0;
+            } else {
+                silence_frames++;
+            }
+        }
+
+        if (recording) {
+            int silence_ms = silence_frames * frame_ms;
+            if (silence_ms > SILENCE_TIMEOUT_MS ||
+                (now - record_start_tick) > pdMS_TO_TICKS(MAX_RECORD_MS)) {
+                recording = false;
+                if (agg_samples > 0) {
+                    tcp_send_audio(agg_buf, (uint16_t)(agg_samples * sizeof(int16_t)),
+                                   audio_seq++, udp_buf, agg_capacity_samples * sizeof(int16_t) + UDP_AUDIO_HEADER);
+                    agg_samples = 0;
+                }
+                tcp_send_stop();
+                audio_close_socket();
+                gpio_set_level(LED_PIN, 0);
+                lcd_show_status("JASON", "PROCESSING...");
+                pending_idle = true;
+                pending_idle_tick = now;
+            }
+        }
+
+        if (pending_idle && (now - pending_idle_tick) > pdMS_TO_TICKS(800)) {
+            lcd_show_idle();
+            pending_idle = false;
+        }
+
+        if (recording && !showing_wake) {
+            if (last_lcd_tick == 0 || (now - last_lcd_tick) > pdMS_TO_TICKS(LISTENING_ANIM_MS)) {
+                listening_dots = (listening_dots % 3) + 1;
+                lcd_show_listening(listening_dots);
+                last_lcd_tick = now;
+            }
         }
 
         if ((log_tick++ % 50) == 0) {
             ESP_LOGI(TAG, "Streaming audio chunks (samples=%d)", feed_chunk);
         }
 
-        if (udp_sock >= 0) {
-            sendto(udp_sock, feed_buf, feed_chunk * sizeof(int16_t), 0,
-                   (struct sockaddr *)&udp_target, sizeof(udp_target));
+        if (recording && audio_sock >= 0 && res) {
+            const int16_t *payload = feed_buf;
+            int payload_bytes = feed_chunk * (int)sizeof(int16_t);
+            if (res->data && res->data_size > 0 && res->data_size <= payload_bytes) {
+                payload = res->data;
+                payload_bytes = res->data_size;
+            }
+            int payload_samples = payload_bytes / (int)sizeof(int16_t);
+            int copied = 0;
+            while (copied < payload_samples) {
+                int space = agg_capacity_samples - agg_samples;
+                int to_copy = payload_samples - copied;
+                if (to_copy > space) {
+                    to_copy = space;
+                }
+                memcpy(&agg_buf[agg_samples], &payload[copied], to_copy * sizeof(int16_t));
+                agg_samples += to_copy;
+                copied += to_copy;
+                if (agg_samples == agg_capacity_samples) {
+                    if (!tcp_send_audio(agg_buf, (uint16_t)(agg_samples * sizeof(int16_t)),
+                                        audio_seq++, udp_buf, agg_capacity_samples * sizeof(int16_t) + UDP_AUDIO_HEADER)) {
+                        recording = false;
+                        audio_close_socket();
+                        gpio_set_level(LED_PIN, 0);
+                        lcd_show_status("NET ERROR", "TCP SEND");
+                        pending_idle = true;
+                        pending_idle_tick = now;
+                        agg_samples = 0;
+                        break;
+                    }
+                    agg_samples = 0;
+                }
+            }
         }
     }
 }
 
 extern "C" void app_main(void) {
     nvs_flash_init();
+    gpio_reset_pin(LED_PIN);
+    gpio_set_direction(LED_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(LED_PIN, 0);
     if (i2c_master_init() == ESP_OK) {
         lcd_init();
         lcd_show_status("SMART HOME", "BOOTING...");
@@ -466,10 +690,10 @@ extern "C" void app_main(void) {
         lcd_show_status("WIFI", "FAILED");
         return;
     }
-    udp_init();
+    audio_init();
     setup_i2s();
     esp_sr_init();
     ESP_LOGI(TAG, "INMP411 analysis ready");
-    lcd_show_status("SMART HOME", "LISTENING...");
+    lcd_show_idle();
     xTaskCreate(audio_task, "audio_task", 8192, NULL, 5, NULL);
 }

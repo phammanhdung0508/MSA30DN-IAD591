@@ -74,3 +74,4 @@ managed_components/
 **/*.map
 sdkconfig.old
 
+apps/api/recordings/*.wav
