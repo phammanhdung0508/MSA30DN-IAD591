@@ -37,4 +37,12 @@ config SMART_HOME_MQ_ADC_CHANNEL
     range 0 9
     default 0
 
+config SMART_HOME_AUDIO_UDP_HOST
+    string "Audio UDP Host (PC IP)"
+    default "192.168.1.50"
+
+config SMART_HOME_AUDIO_UDP_PORT
+    int "Audio UDP Port"
+    default 3334
+
 endmenu

@@ -5,5 +5,7 @@ list(APPEND EXTRA_COMPONENT_DIRS
     "main/smart_home_mqtt"
 )
 
+set(EXCLUDE_COMPONENTS "esp_lcd")
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(iot)

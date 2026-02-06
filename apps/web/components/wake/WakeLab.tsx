@@ -31,6 +31,12 @@ export function WakeLab() {
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const targetSampleRate = 16000;
 
+    const [listenStatus, setListenStatus] = useState<StreamStatus>("idle");
+    const wsListenRef = useRef<WebSocket | null>(null);
+    const listenCtxRef = useRef<AudioContext | null>(null);
+    const listenProcessorRef = useRef<ScriptProcessorNode | null>(null);
+    const audioQueueRef = useRef<Float32Array[]>([]);
+
     const canUseSpeechApi = useMemo(() => {
         if (typeof window === "undefined") return false;
         return "webkitSpeechRecognition" in window || "SpeechRecognition" in window;
@@ -191,13 +197,86 @@ export function WakeLab() {
         setStreamStatus("idle");
     }, []);
 
+    const startListeningFromEsp = useCallback(() => {
+        if (listenStatus === "streaming") return;
+        setListenStatus("connecting");
+
+        try {
+            const ws = new WebSocket(wsUrl);
+            ws.binaryType = "arraybuffer";
+            wsListenRef.current = ws;
+
+            ws.onopen = () => {
+                const ctx = new AudioContext({ sampleRate: targetSampleRate });
+                listenCtxRef.current = ctx;
+
+                const processor = ctx.createScriptProcessor(4096, 1, 1);
+                listenProcessorRef.current = processor;
+                processor.onaudioprocess = (event) => {
+                    const out = event.outputBuffer.getChannelData(0);
+                    let offset = 0;
+                    while (offset < out.length) {
+                        if (audioQueueRef.current.length === 0) {
+                            out.fill(0, offset);
+                            break;
+                        }
+                        const buf = audioQueueRef.current[0];
+                        const copy = Math.min(buf.length, out.length - offset);
+                        out.set(buf.subarray(0, copy), offset);
+                        offset += copy;
+                        if (copy < buf.length) {
+                            audioQueueRef.current[0] = buf.subarray(copy);
+                        } else {
+                            audioQueueRef.current.shift();
+                        }
+                    }
+                };
+                processor.connect(ctx.destination);
+                setListenStatus("streaming");
+            };
+
+            ws.onmessage = (event) => {
+                const data = event.data;
+                if (!(data instanceof ArrayBuffer)) return;
+                const int16 = new Int16Array(data);
+                const float32 = new Float32Array(int16.length);
+                for (let i = 0; i < int16.length; i++) {
+                    float32[i] = int16[i] / 32768;
+                }
+                audioQueueRef.current.push(float32);
+            };
+            ws.onerror = () => setListenStatus("error");
+            ws.onclose = () => setListenStatus("idle");
+        } catch {
+            setListenStatus("error");
+        }
+    }, [listenStatus, targetSampleRate, wsUrl]);
+
+    const stopListeningFromEsp = useCallback(() => {
+        if (wsListenRef.current) {
+            wsListenRef.current.close();
+            wsListenRef.current = null;
+        }
+        if (listenProcessorRef.current) {
+            listenProcessorRef.current.disconnect();
+            listenProcessorRef.current = null;
+        }
+        if (listenCtxRef.current) {
+            listenCtxRef.current.close();
+            listenCtxRef.current = null;
+        }
+        audioQueueRef.current = [];
+        setListenStatus("idle");
+    }, []);
+
     useEffect(() => {
         return () => {
             disconnectMqtt();
             stopListening();
             stopStreaming();
+            stopListeningFromEsp();
         };
-    }, [disconnectMqtt, stopListening, stopStreaming]);
+    }, [disconnectMqtt, stopListening, stopStreaming, stopListeningFromEsp]);
 
     return (
         <div className="max-w-6xl mx-auto space-y-6">
@@ -338,9 +417,31 @@ export function WakeLab() {
                         </button>
                     </div>
 
+                    <div className="pt-4 border-t border-white/10 space-y-3">
+                        <div className="text-sm text-slate-300">Listen From ESP32 (UDP → WS)</div>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={startListeningFromEsp}
+                                className="px-4 py-2 rounded-xl bg-emerald-500 text-white text-sm font-semibold"
+                            >
+                                Start Listen
+                            </button>
+                            <button
+                                onClick={stopListeningFromEsp}
+                                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-sm font-semibold"
+                            >
+                                Stop Listen
+                            </button>
+                        </div>
+                        <div className="text-xs text-slate-400">
+                            Requires ws-udp-bridge with --listen and ESP32 sending PCM 16kHz mono.
+                        </div>
+                    </div>
+
                     <div className="text-xs text-slate-400 leading-relaxed">
                         Requires the UDP bridge script on your machine. The bridge forwards raw PCM 16kHz
-                        mono audio to ESP32 UDP port 3333. See `apps/web/scripts/ws-udp-bridge.mjs`.
+                        mono audio to ESP32 UDP port 3333 and can relay UDP audio from ESP32 to WebSocket
+                        clients when started with --listen. See `apps/web/scripts/ws-udp-bridge.mjs`.
                     </div>
                 </GlassCard>
             </div>
