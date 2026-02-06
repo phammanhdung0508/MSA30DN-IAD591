@@ -7,7 +7,13 @@ from gemini_client import gemini_generate
 logger = logging.getLogger(__name__)
 
 class WhisperWorker:
-    def __init__(self, model: str = "base", language: str | None = None, task: str = "transcribe") -> None:
+    def __init__(
+        self,
+        model: str = "base",
+        language: str | None = None,
+        task: str = "transcribe",
+        on_result=None,
+    ) -> None:
         self.model_name = model
         self.language = language
         self.task = task
@@ -15,6 +21,7 @@ class WhisperWorker:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._model = None
+        self._on_result = on_result
 
     def start(self) -> None:
         if self._thread:
@@ -30,6 +37,9 @@ class WhisperWorker:
 
     def submit(self, wav_path: str) -> None:
         self._queue.put(wav_path)
+
+    def queue_size(self) -> int:
+        return self._queue.qsize()
 
     def _load_model(self) -> None:
         import whisper
@@ -59,5 +69,10 @@ class WhisperWorker:
                     gemini = gemini_generate(text)
                     if gemini:
                         logger.info("Gemini result: %s", gemini)
+                    if self._on_result:
+                        try:
+                            self._on_result(wav_path, text, gemini)
+                        except Exception:
+                            logger.exception("Whisper on_result callback failed")
             except Exception:
                 logger.exception("Whisper transcription failed for %s", wav_path)

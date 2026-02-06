@@ -2,11 +2,7 @@
 
 import React, { useState } from "react";
 import {
-    LayoutDashboard,
     BarChart3,
-    CalendarClock,
-    Settings,
-    Leaf,
     Sparkles,
     Home,
     LogOut,
@@ -15,7 +11,7 @@ import {
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 
-export type ViewType = "dashboard" | "analytics" | "schedule" | "settings" | "wake";
+export type ViewType = "analytics" | "wake";
 
 interface AppLayoutProps {
     children: React.ReactNode;
@@ -25,11 +21,8 @@ interface AppLayoutProps {
 
 export function AppLayout({ children, currentView, onNavigate }: AppLayoutProps) {
     const menuItems = [
-        { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
         { id: "analytics", label: "Analytics", icon: BarChart3 },
-        { id: "schedule", label: "Smart Schedule", icon: CalendarClock },
         { id: "wake", label: "Wake Lab", icon: Mic },
-        { id: "settings", label: "Settings", icon: Settings },
     ];
 
     return (
@@ -43,9 +36,9 @@ export function AppLayout({ children, currentView, onNavigate }: AppLayoutProps)
                     <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
                         <Sparkles className="text-white w-6 h-6" />
                     </div>
-                    <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400 hidden lg:block">
+                    {/* <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400 hidden lg:block">
                         SmartAC
-                    </span>
+                    </span> */}
                 </div>
 
                 {/* Menu */}
@@ -82,16 +75,7 @@ export function AppLayout({ children, currentView, onNavigate }: AppLayoutProps)
 
                 {/* Bottom Actions */}
                 <div className="space-y-4">
-                    {/* Eco Badge */}
-                    <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-500/10 to-emerald-900/10 border border-emerald-500/20 hidden lg:block">
-                        <div className="flex items-center gap-3 mb-2">
-                            <Leaf className="w-5 h-5 text-emerald-400" />
-                            <span className="text-sm font-bold text-emerald-300">Eco Active</span>
-                        </div>
-                        <div className="text-xs text-emerald-500/80">
-                            You saved 14kWh this week.
-                        </div>
-                    </div>
+                    {/* Eco Badge removed */}
 
                     <button className="w-full flex items-center gap-4 p-3 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all">
                         <LogOut className="w-6 h-6" />

@@ -66,6 +66,12 @@ class TcpAudioRecorder:
         if self._whisper:
             self._whisper.stop()
 
+    def is_running(self) -> bool:
+        return self._thread is not None
+
+    def is_recording(self) -> bool:
+        return self._recording
+
     def _open_wav(self) -> None:
         if self._wav:
             return

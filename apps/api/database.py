@@ -3,6 +3,7 @@ import os
 import json
 import logging
 from datetime import datetime, timedelta
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -243,5 +244,120 @@ def save_schedule(device_id: str, schedule_grid):
         logger.error(f"Save schedule error: {e}")
         conn.rollback()
         return False
+    finally:
+        conn.close()
+
+# --- Chat Functions ---
+
+def create_chat_session(session_id: str | None = None, source: str | None = None) -> str:
+    sid = session_id or str(uuid4())
+    conn = get_db_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR IGNORE INTO chat_sessions (id, source)
+                VALUES (?, ?)
+            ''', (sid, source))
+            conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"Failed to create chat session: {e}")
+        finally:
+            conn.close()
+    return sid
+
+def add_chat_message(session_id: str, role: str, text: str, meta: dict | None = None):
+    conn = get_db_connection()
+    if not conn:
+        return None
+    try:
+        cursor = conn.cursor()
+        meta_str = json.dumps(meta) if meta else None
+        cursor.execute('''
+            INSERT INTO chat_messages (session_id, role, text, meta)
+            VALUES (?, ?, ?, ?)
+        ''', (session_id, role, text, meta_str))
+        msg_id = cursor.lastrowid
+        cursor.execute('''
+            SELECT created_at FROM chat_messages WHERE id = ?
+        ''', (msg_id,))
+        row = cursor.fetchone()
+        conn.commit()
+        return {"id": msg_id, "created_at": row["created_at"] if row else None}
+    except sqlite3.Error as e:
+        logger.error(f"Failed to insert chat message: {e}")
+        return None
+    finally:
+        conn.close()
+
+def get_chat_history(session_id: str, limit: int = 200):
+    conn = get_db_connection()
+    if not conn:
+        return []
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, role, text, meta, created_at
+            FROM chat_messages
+            WHERE session_id = ?
+            ORDER BY id ASC
+            LIMIT ?
+        ''', (session_id, limit))
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            meta = None
+            if row["meta"]:
+                try:
+                    meta = json.loads(row["meta"])
+                except json.JSONDecodeError:
+                    meta = row["meta"]
+            result.append({
+                "id": row["id"],
+                "role": row["role"],
+                "text": row["text"],
+                "meta": meta,
+                "ts": row["created_at"]
+            })
+        return result
+    except sqlite3.Error as e:
+        logger.error(f"Failed to fetch chat history: {e}")
+        return []
+    finally:
+        conn.close()
+
+def get_last_messages(session_id: str, limit: int = 2):
+    conn = get_db_connection()
+    if not conn:
+        return []
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, role, text, meta, created_at
+            FROM chat_messages
+            WHERE session_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+        ''', (session_id, limit))
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            meta = None
+            if row["meta"]:
+                try:
+                    meta = json.loads(row["meta"])
+                except json.JSONDecodeError:
+                    meta = row["meta"]
+            result.append({
+                "id": row["id"],
+                "role": row["role"],
+                "text": row["text"],
+                "meta": meta,
+                "ts": row["created_at"]
+            })
+        return result
+    except sqlite3.Error as e:
+        logger.error(f"Failed to fetch last chat messages: {e}")
+        return []
     finally:
         conn.close()

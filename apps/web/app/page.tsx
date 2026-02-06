@@ -1,23 +1,18 @@
 "use client";
 
-import React, { useState } from "react";
-import { AppLayout, ViewType } from "@/components/layout/AppLayout";
-import { DashboardMain } from "@/components/dashboard/DashboardMain";
-import { AnalyticsView } from "@/components/analytics/AnalyticsView";
-import { SmartSchedule } from "@/components/schedule/SmartSchedule";
-import { SettingsView } from "@/components/settings/SettingsView";
-import { WakeLab } from "@/components/wake/WakeLab";
+import React from "react";
+import { ChatView } from "@/components/chat/ChatView";
 
 export default function Page() {
-    const [currentView, setCurrentView] = useState<ViewType>("dashboard");
-
     return (
-        <AppLayout currentView={currentView} onNavigate={setCurrentView}>
-            {currentView === "dashboard" && <DashboardMain />}
-            {currentView === "analytics" && <AnalyticsView />}
-            {currentView === "schedule" && <SmartSchedule />}
-            {currentView === "wake" && <WakeLab />}
-            {currentView === "settings" && <SettingsView />}
-        </AppLayout>
+        <div className="min-h-screen bg-slate-950 px-4 py-6">
+            <div className="mx-auto h-[92vh] w-full max-w-[430px] overflow-hidden rounded-[36px] border border-white/10 bg-gradient-to-b from-slate-900/90 via-slate-950/85 to-slate-950/95 shadow-[0_24px_80px_rgba(15,23,42,0.55)] backdrop-blur">
+                <div className="relative h-full overflow-hidden">
+                    <div className="pointer-events-none absolute -top-10 right-[-35%] h-56 w-56 rounded-full bg-cyan-500/10 blur-[90px]" />
+                    <div className="pointer-events-none absolute bottom-[-20%] left-[-30%] h-64 w-64 rounded-full bg-blue-500/10 blur-[100px]" />
+                    <ChatView />
+                </div>
+            </div>
+        </div>
     );
 }

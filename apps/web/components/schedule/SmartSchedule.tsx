@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { GlassCard } from "@/components/shared/GlassCard";
 import { cn } from "@/lib/utils";
 import { Clock, CheckCircle2, RotateCcw, Loader2 } from "lucide-react";
-import { getSchedule, saveSchedule } from "@/lib/api";
+// import { getSchedule, saveSchedule } from "@/lib/api";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
@@ -28,25 +28,25 @@ export function SmartSchedule() {
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
 
-    useEffect(() => {
-        const load = async () => {
-            setIsLoading(true);
-            const data = await getSchedule();
-            setSchedule(normalizeSchedule(data));
-            setIsLoading(false);
-        };
-        load();
-    }, []);
+    // useEffect(() => {
+    //     const load = async () => {
+    //         setIsLoading(true);
+    //         const data = await getSchedule();
+    //         setSchedule(normalizeSchedule(data));
+    //         setIsLoading(false);
+    //     };
+    //     load();
+    // }, []);
 
-    const handleSave = async () => {
-        setIsSaving(true);
-        try {
-            await saveSchedule(schedule);
-            // Could add toast here
-        } finally {
-            setIsSaving(false);
-        }
-    };
+    // const handleSave = async () => {
+    //     setIsSaving(true);
+    //     try {
+    //         await saveSchedule(schedule);
+    //         // Could add toast here
+    //     } finally {
+    //         setIsSaving(false);
+    //     }
+    // };
 
     const toggleBlock = (d: number, h: number) => {
         const newSchedule = schedule.map(row => [...row]);
@@ -68,14 +68,14 @@ export function SmartSchedule() {
                     >
                         <RotateCcw className="w-4 h-4" /> Reset
                     </button>
-                    <button
+                    {/* <button
                         onClick={handleSave}
                         disabled={isSaving}
                         className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 text-white hover:bg-cyan-500 transition disabled:opacity-50"
                     >
                         {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                         Save Schedule
-                    </button>
+                    </button> */}
                 </div>
             </header>
 
@@ -123,10 +123,10 @@ export function SmartSchedule() {
                 </div>
 
                 <div className="mt-8 flex gap-8 items-center justify-center text-sm text-slate-400">
-                    <div className="flex items-center gap-2">
+                    {/* <div className="flex items-center gap-2">
                         <div className="w-4 h-4 bg-cyan-500 rounded" />
                         <span>AC On (22\u00B0C Cool)</span>
-                    </div>
+                    </div> */}
                     <div className="flex items-center gap-2">
                         <div className="w-4 h-4 bg-slate-800/50 rounded" />
                         <span>Off</span>

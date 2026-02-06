@@ -18,3 +18,22 @@ CREATE TABLE IF NOT EXISTS schedules (
     mode TEXT DEFAULT 'cool',
     UNIQUE(device_id, day_of_week, hour)
 );
+
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id TEXT PRIMARY KEY,
+    source TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL, -- user | assistant | system
+    text TEXT NOT NULL,
+    meta TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(session_id) REFERENCES chat_sessions(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_session_created
+    ON chat_messages(session_id, created_at);
