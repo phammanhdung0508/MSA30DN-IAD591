@@ -1,32 +1,41 @@
-# Smart Home IoT System
+# Smart Home Voice Assistant
 
-A comprehensive Smart Home solution integrating a Next.js frontend, FastAPI backend, and Arduino-based IoT devices using MQTT communication.
+A voice-first Smart Home system that connects ESP32 wake-word detection with a FastAPI backend (Whisper + Gemini) and a mobile-first web UI.
+
+## System Overview
+
+1. ESP32 detects wake word (“Hi, Jason”).
+2. ESP32 streams audio via TCP to the API server.
+3. API saves WAV, transcribes with Whisper, sends text to Gemini.
+4. User text + Gemini response are stored in SQLite.
+5. Web UI displays the conversation as a mobile-first chat screen.
 
 ## Project Structure
 
 This monorepo contains:
 
-- **`apps/web`**: Next.js 14 application serving as the main control dashboard.
-  - Features: Glassmorphism UI, Real-time status updates, Interactive controls, Analytics charts (Recharts).
+- **`apps/web`**: Next.js 14 mobile-first web UI for chat.
+  - Features: Minimal chat display UI.
 - **`apps/api`**: FastAPI backend service.
-  - Features: MQTT Client (Paho), SQLite Database integration, REST API endpoints.
-- **`apps/iot`**: C++ code for ESP32/Arduino devices.
-  - Features: MQTT connectivity, reading DHT sensors (Temp/Humidity), Actuator control (LED/Buzzer).
+  - Features: TCP audio receiver, Whisper transcription, Gemini response, SQLite storage, MQTT ingest.
+- **`apps/iot`**: ESP32-S3 firmware.
+  - Features: Wake word detection (ESP-SR), TCP audio streaming, LCD status.
 - **`packages/db`**: Shared SQLite database location.
 
 ## Features
 
-- **Real-time Monitoring**: Live display of Temperature and Humidity from IoT sensors.
-- **Remote Control**: Toggle AC power, change modes (Cool/Heat/Dry/Fan), and adjust Fan Speed.
-- **Analytics**: Visualization of temperature trends over the last 24 hours.
-- **Automated Communication**: Seamless synchronization between Web Dashboard and Hardware via MQTT.
+- **Wake Word**: ESP32 detects “Hi, Jason”.
+- **Audio Streaming**: TCP audio stream from ESP32 to API.
+- **Speech → Text**: Whisper transcription.
+- **Text → Response**: Gemini generates assistant replies.
+- **Chat Log**: Conversation saved to SQLite and displayed in UI.
 
 ## Tech Stack
 
-- **Frontend**: React, Next.js, TailwindCSS, Lucide Icons, Recharts.
-- **Backend**: Python, FastAPI, SQLite3, Paho-MQTT.
-- **Communication Protocol**: MQTT (HiveMQ Public Broker).
-- **Hardware/Simulation**: ESP32 (Wokwi Compatible), DHT22 Sensor.
+- **Frontend**: React, Next.js, TailwindCSS.
+- **Backend**: Python, FastAPI, SQLite3, Whisper, Gemini API.
+- **Communication Protocol**: TCP (audio stream), MQTT (optional telemetry).
+- **Hardware**: ESP32-S3 + INMP411 mic + (optional) I2C LCD.
 
 ## Setup & Installation
 
@@ -49,10 +58,32 @@ python -m venv venv
 # Windows:
 .\venv\Scripts\activate
 # Install requirements
-pip install fastapi uvicorn paho-mqtt
+pip install -r requirements.txt
 ```
 
-### 3. Database Setup
+### 3. Optional Whisper Install
+Whisper is not installed by default. If you want local transcription:
+```bash
+pip install -U openai-whisper torch
+```
+
+### 4. Environment Variables
+Create/edit `apps/api/.env`:
+```
+GEMINI_API_KEY=your_key
+GEMINI_MODEL=gemini-2.5-flash
+WHISPER_ENABLED=1
+WHISPER_MODEL=base
+WHISPER_LANGUAGE=
+WHISPER_TASK=transcribe
+AUDIO_TCP_ENABLED=1
+AUDIO_TCP_HOST=0.0.0.0
+AUDIO_TCP_PORT=3334
+CHAT_DEVICE_SESSION_ID=device
+CHAT_DEFAULT_SESSION_ID=device
+```
+
+### 5. Database Setup
 The SQLite database is automatically initialized at `packages/db/smarthome.db` when the API server starts.
 
 ## Running the Application
@@ -79,19 +110,33 @@ pnpm dev
 ```
 
 **IoT Device:**
-- Open `apps/iot/main/smart_home_mqtt/smart_home_mqtt.ino` in Arduino IDE or Wokwi.
-- Ensure the device is connected to WiFi and the configured MQTT Broker.
+- Build/flash `apps/iot` using PlatformIO.
+- Set WiFi + audio host/port in `sdkconfig`:
+  - `CONFIG_SMART_HOME_WIFI_SSID`
+  - `CONFIG_SMART_HOME_WIFI_PASSWORD`
+  - `CONFIG_SMART_HOME_AUDIO_UDP_HOST` (API server IP)
+  - `CONFIG_SMART_HOME_AUDIO_UDP_PORT` (API TCP port, default 3334)
 
-## MQTT Configuration
+## Chat API (Backend)
+
+- `POST /chat/session`
+- `GET /chat/session/{id}`
+- `POST /chat/message`
+- `GET /chat/last`
+- `GET /chat/status`
+
+## MQTT Configuration (Optional)
 
 - **Broker**: Configure via `MQTT_BROKER_URL` (API) and `SMART_HOME_MQTT_BROKER_URI` (ESP32).
 - **Auth**: Optional via `MQTT_USERNAME` / `MQTT_PASSWORD` and `SMART_HOME_MQTT_USERNAME` / `SMART_HOME_MQTT_PASSWORD`.
-- **Topics**:
-  - Telemetry (Sensor -> Cloud): `sensor/temp_humid_msa_assign1`
-  - Control (Cloud -> Device): `sensor/control_msa_assign1`
+**Topics**:
+- Telemetry (Sensor -> Cloud): `sensor/temp_humid_msa_assign1`
+- Smart Home wildcard: `smart-home/+/+/+/+`
 
 ## Database Schema
 
 The system uses SQLite. Key tables:
 - `device_data`: Stores telemetry logs (JSON payload) with timestamps.
 - `schedules`: Stores device automation schedules.
+- `chat_sessions`: Chat session metadata.
+- `chat_messages`: Stored conversation messages (user/assistant).
