@@ -8,6 +8,9 @@ from database import (
     add_chat_message,
     get_chat_history,
     get_last_messages,
+    get_latest_device_data,
+    get_device_data_history,
+    get_sensor_summary,
 )
 import logging
 import os
@@ -177,6 +180,29 @@ def get_chat_status():
         "recording": tcp_recorder.is_recording(),
         "whisper_queue": whisper_worker.queue_size() if whisper_worker else 0,
     }
+
+@app.get("/sensor/latest")
+def get_sensor_latest(device_id: str = "esp32-main"):
+    data = get_latest_device_data(device_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="No sensor data found")
+    return {"device_id": device_id, **data}
+
+@app.get("/sensor/history")
+def get_sensor_history(device_id: str = "esp32-main", limit: int = 100):
+    if limit <= 0 or limit > 1000:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 1000")
+    rows = get_device_data_history(device_id, limit=limit)
+    return {"device_id": device_id, "count": len(rows), "items": rows}
+
+@app.get("/sensor/summary")
+def get_sensor_summary_endpoint(device_id: str = "esp32-main", hours: int = 24):
+    if hours <= 0 or hours > 168:
+        raise HTTPException(status_code=400, detail="hours must be between 1 and 168")
+    summary = get_sensor_summary(device_id, hours=hours)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="No sensor data found")
+    return {"device_id": device_id, "hours": hours, "summary": summary}
 
 # @app.get("/")
 # def read_root():

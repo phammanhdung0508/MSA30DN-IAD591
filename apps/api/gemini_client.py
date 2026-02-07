@@ -4,6 +4,8 @@ import os
 import urllib.error
 import urllib.request
 
+from database import get_latest_device_data
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_GEMINI_PROMPT = (
@@ -16,6 +18,43 @@ DEFAULT_GEMINI_PROMPT = (
 )
 
 
+SENSOR_KEYWORDS = ("temperature", "humidity", "air", "quantity")
+
+
+def _needs_sensor_context(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(keyword in lowered for keyword in SENSOR_KEYWORDS)
+
+
+def _build_sensor_context() -> str:
+    device_id = os.getenv("SENSOR_DEVICE_ID", "esp32-main")
+    latest = get_latest_device_data(device_id)
+    if not latest:
+        return "SENSOR_DATA: unavailable."
+    data = latest.get("data") or {}
+    timestamp = latest.get("timestamp") or "unknown"
+    fields = []
+    for key, label, unit in [
+        ("temperature", "temperature", "C"),
+        ("humidity", "humidity", "%"),
+        ("co2", "co2", "ppm"),
+        ("gas", "gas", "ppm"),
+        ("nh3", "nh3", "ppm"),
+        ("co", "co", "ppm"),
+        ("rs", "rs", ""),
+        ("ratio", "ratio", ""),
+    ]:
+        value = data.get(key)
+        if value is None:
+            continue
+        if unit:
+            fields.append(f"{label}={value}{unit}")
+        else:
+            fields.append(f"{label}={value}")
+    details = "; ".join(fields) if fields else "no fields"
+    return f"SENSOR_DATA (latest, {timestamp}): {details}."
+
+
 def gemini_generate(transcript: str) -> str | None:
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
@@ -25,7 +64,17 @@ def gemini_generate(transcript: str) -> str | None:
     model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     prompt = os.getenv("GEMINI_PROMPT", DEFAULT_GEMINI_PROMPT)
 
-    text = f"{prompt}\n\nTRANSCRIPT:\n{transcript}"
+    context = None
+    if _needs_sensor_context(transcript):
+        context = _build_sensor_context()
+    if context:
+        text = (
+            f"{prompt}\n\n{context}\n"
+            "Use SENSOR_DATA to answer questions about temperature, humidity, or air quality.\n\n"
+            f"TRANSCRIPT:\n{transcript}"
+        )
+    else:
+        text = f"{prompt}\n\nTRANSCRIPT:\n{transcript}"
     payload = {
         "contents": [
             {

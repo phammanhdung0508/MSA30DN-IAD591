@@ -12,12 +12,16 @@
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "esp_rom_sys.h"
+#include "esp_timer.h"
 #include "esp_netif_ip_addr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "mqtt_client.h"
+#include "esp_adc/adc_oneshot.h"
 #include "driver/gpio.h"
+#include "nvs.h"
 #include "nvs_flash.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
@@ -36,6 +40,10 @@ static const char *WIFI_SSID = CONFIG_SMART_HOME_WIFI_SSID;
 static const char *WIFI_PASS = CONFIG_SMART_HOME_WIFI_PASSWORD;
 static const char *AUDIO_UDP_HOST = CONFIG_SMART_HOME_AUDIO_UDP_HOST;
 static const int AUDIO_UDP_PORT = CONFIG_SMART_HOME_AUDIO_UDP_PORT;
+static const char *MQTT_BROKER_URI = CONFIG_SMART_HOME_MQTT_BROKER_URI;
+static const char *MQTT_USERNAME = CONFIG_SMART_HOME_MQTT_USERNAME;
+static const char *MQTT_PASSWORD = CONFIG_SMART_HOME_MQTT_PASSWORD;
+static const char *MQTT_TOPIC_SENSOR = CONFIG_SMART_HOME_MQTT_TOPIC_SENSOR;
 
 // INMP411 wiring (from INMP411.c)
 static const gpio_num_t I2S_SCK = GPIO_NUM_12; // BCLK
@@ -49,6 +57,8 @@ static const gpio_num_t I2C_SCL = GPIO_NUM_4;
 static const gpio_num_t I2C_SDA = GPIO_NUM_5;
 static const uint32_t I2C_CLK_HZ = 100000;
 static const gpio_num_t LED_PIN = GPIO_NUM_6;
+static const gpio_num_t DHT11_PIN = GPIO_NUM_1;
+static const gpio_num_t MQ135_PIN = GPIO_NUM_2;
 
 static const int SAMPLE_RATE = 16000;
 static const int SILENCE_TIMEOUT_MS = 2000;
@@ -58,6 +68,21 @@ static const int ENERGY_THRESHOLD = 250;
 static const uint32_t UDP_AUDIO_HEADER = 10;
 static const int AUDIO_GAIN_SHIFT = 2; // +12dB (x4)
 static const int UDP_AGG_FRAMES = 3;   // aggregate frames to reduce UDP packet rate
+static const int SENSOR_PUBLISH_MS = 10000;
+static const int DHT_SAMPLE_COUNT = 3;
+static const int DHT_SAMPLE_DELAY_MS = 1200;
+static const int MQ135_CALIB_SAMPLES = 10;
+static const int MQ135_CALIB_DELAY_MS = 200;
+static const float MQ135_RL_OHMS = 10000.0f;
+static const float MQ135_CLEAN_AIR_RATIO = 3.6f;
+static const bool MQ135_FORCE_RECALIBRATE = false;
+static const float MQ135_NH3_A = 102.2f;
+static const float MQ135_NH3_B = -2.473f;
+static const float MQ135_CO_A = 605.18f;
+static const float MQ135_CO_B = -3.937f;
+// CO2 curve (approx, from datasheet fit).
+static const float MQ135_CO2_A = 110.47f;
+static const float MQ135_CO2_B = -2.862f;
 
 static i2s_chan_handle_t rx_handle = NULL;
 static int audio_sock = -1;
@@ -65,6 +90,8 @@ static struct sockaddr_in audio_target = {};
 
 static EventGroupHandle_t wifi_event_group;
 static const int WIFI_CONNECTED_BIT = BIT0;
+static EventGroupHandle_t mqtt_event_group;
+static const int MQTT_CONNECTED_BIT = BIT0;
 
 static esp_afe_sr_iface_t *afe_handle = NULL;
 static esp_afe_sr_data_t *afe_data = NULL;
@@ -75,6 +102,14 @@ static uint8_t lcd_addr = 0x27;
 static bool lcd_backlight = true;
 static i2c_master_bus_handle_t i2c_bus = NULL;
 static i2c_master_dev_handle_t lcd_dev = NULL;
+static esp_mqtt_client_handle_t mqtt_client = NULL;
+static adc_oneshot_unit_handle_t adc_handle = NULL;
+static adc_unit_t mq135_unit = ADC_UNIT_1;
+static adc_channel_t mq135_channel = ADC_CHANNEL_1;
+static float mq135_r0 = 10000.0f;
+static const char *MQ135_NVS_NS = "mq135";
+static const char *MQ135_NVS_KEY_R0 = "r0";
+static const char *MQ135_NVS_KEY_FORCE = "force";
 
 #define LCD_RS 0x01
 #define LCD_EN 0x04
@@ -133,6 +168,399 @@ static bool wifi_init_sta(void) {
         ESP_LOGI(TAG, "WiFi IP: " IPSTR, IP2STR(&ip_info.ip));
     }
     return true;
+}
+
+static void mqtt_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+    esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
+    switch (event->event_id) {
+        case MQTT_EVENT_CONNECTED:
+            ESP_LOGI(TAG, "MQTT connected");
+            if (mqtt_event_group) {
+                xEventGroupSetBits(mqtt_event_group, MQTT_CONNECTED_BIT);
+            }
+            break;
+        case MQTT_EVENT_DISCONNECTED:
+            ESP_LOGW(TAG, "MQTT disconnected");
+            if (mqtt_event_group) {
+                xEventGroupClearBits(mqtt_event_group, MQTT_CONNECTED_BIT);
+            }
+            break;
+        case MQTT_EVENT_ERROR:
+            ESP_LOGW(TAG, "MQTT error");
+            break;
+        default:
+            break;
+    }
+}
+
+static bool mqtt_init(void) {
+    if (!MQTT_BROKER_URI || strlen(MQTT_BROKER_URI) == 0) {
+        ESP_LOGW(TAG, "MQTT broker URI not set");
+        return false;
+    }
+    mqtt_event_group = xEventGroupCreate();
+    if (!mqtt_event_group) {
+        ESP_LOGE(TAG, "MQTT event group alloc failed");
+        return false;
+    }
+
+    esp_mqtt_client_config_t mqtt_cfg = {};
+    mqtt_cfg.broker.address.uri = MQTT_BROKER_URI;
+    if (MQTT_USERNAME && strlen(MQTT_USERNAME) > 0) {
+        mqtt_cfg.credentials.username = MQTT_USERNAME;
+    }
+    if (MQTT_PASSWORD && strlen(MQTT_PASSWORD) > 0) {
+        mqtt_cfg.credentials.authentication.password = MQTT_PASSWORD;
+    }
+
+    mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
+    if (!mqtt_client) {
+        ESP_LOGE(TAG, "MQTT client init failed");
+        return false;
+    }
+    esp_mqtt_client_register_event(mqtt_client, MQTT_EVENT_ANY, mqtt_event_handler, NULL);
+    esp_mqtt_client_start(mqtt_client);
+    ESP_LOGI(TAG, "MQTT connecting to %s", MQTT_BROKER_URI);
+    return true;
+}
+
+static void dht11_prepare_pin(void) {
+    gpio_reset_pin(DHT11_PIN);
+    gpio_set_direction(DHT11_PIN, GPIO_MODE_INPUT_OUTPUT_OD);
+    gpio_set_level(DHT11_PIN, 1);
+    gpio_set_pull_mode(DHT11_PIN, GPIO_PULLUP_ONLY);
+}
+
+static bool dht_wait_level(gpio_num_t pin, int level, int timeout_us) {
+    int64_t start = esp_timer_get_time();
+    while (gpio_get_level(pin) != level) {
+        if ((esp_timer_get_time() - start) > timeout_us) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static int dht_measure_level(gpio_num_t pin, int level, int timeout_us) {
+    int64_t start = esp_timer_get_time();
+    while (gpio_get_level(pin) == level) {
+        if ((esp_timer_get_time() - start) > timeout_us) {
+            return -1;
+        }
+    }
+    return (int)(esp_timer_get_time() - start);
+}
+
+static bool dht11_read(int *temperature, int *humidity) {
+    if (!temperature || !humidity) {
+        return false;
+    }
+
+    gpio_set_direction(DHT11_PIN, GPIO_MODE_OUTPUT_OD);
+    gpio_set_level(DHT11_PIN, 0);
+    esp_rom_delay_us(18000);
+    gpio_set_level(DHT11_PIN, 1);
+    esp_rom_delay_us(40);
+    gpio_set_direction(DHT11_PIN, GPIO_MODE_INPUT);
+
+    if (!dht_wait_level(DHT11_PIN, 0, 100)) return false;
+    if (!dht_wait_level(DHT11_PIN, 1, 100)) return false;
+    if (!dht_wait_level(DHT11_PIN, 0, 100)) return false;
+
+    uint8_t data[5] = {};
+    for (int i = 0; i < 40; i++) {
+        if (!dht_wait_level(DHT11_PIN, 1, 100)) {
+            return false;
+        }
+        int high_us = dht_measure_level(DHT11_PIN, 1, 120);
+        if (high_us < 0) {
+            return false;
+        }
+        if (high_us > 40) {
+            data[i / 8] |= (1 << (7 - (i % 8)));
+        }
+    }
+
+    uint8_t sum = data[0] + data[1] + data[2] + data[3];
+    if (sum != data[4]) {
+        return false;
+    }
+
+    *humidity = data[0];
+    *temperature = data[2];
+    return true;
+}
+
+static void sort_ints(int *values, int count) {
+    for (int i = 1; i < count; i++) {
+        int key = values[i];
+        int j = i - 1;
+        while (j >= 0 && values[j] > key) {
+            values[j + 1] = values[j];
+            j--;
+        }
+        values[j + 1] = key;
+    }
+}
+
+static bool dht11_read_median(int *temperature, int *humidity) {
+    if (!temperature || !humidity) {
+        return false;
+    }
+    int temps[DHT_SAMPLE_COUNT];
+    int hums[DHT_SAMPLE_COUNT];
+    int ok = 0;
+    for (int i = 0; i < DHT_SAMPLE_COUNT; i++) {
+        int t = 0;
+        int h = 0;
+        if (dht11_read(&t, &h)) {
+            temps[ok] = t;
+            hums[ok] = h;
+            ok++;
+        }
+        if (i + 1 < DHT_SAMPLE_COUNT) {
+            vTaskDelay(pdMS_TO_TICKS(DHT_SAMPLE_DELAY_MS));
+        }
+    }
+
+    if (ok == 0) {
+        return false;
+    }
+    sort_ints(temps, ok);
+    sort_ints(hums, ok);
+    *temperature = temps[ok / 2];
+    *humidity = hums[ok / 2];
+    return true;
+}
+
+static bool adc_init(void) {
+    if (adc_handle) {
+        return true;
+    }
+    if (adc_oneshot_io_to_channel((int)MQ135_PIN, &mq135_unit, &mq135_channel) != ESP_OK) {
+        ESP_LOGE(TAG, "MQ135 pin is not ADC capable");
+        return false;
+    }
+    adc_oneshot_unit_init_cfg_t init_cfg = {};
+    init_cfg.unit_id = mq135_unit;
+    init_cfg.ulp_mode = ADC_ULP_MODE_DISABLE;
+
+    esp_err_t err = adc_oneshot_new_unit(&init_cfg, &adc_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ADC oneshot init failed: %d", (int)err);
+        return false;
+    }
+    adc_oneshot_chan_cfg_t chan_cfg = {};
+    chan_cfg.bitwidth = ADC_BITWIDTH_12;
+    chan_cfg.atten = ADC_ATTEN_DB_12;
+    err = adc_oneshot_config_channel(adc_handle, mq135_channel, &chan_cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ADC channel config failed: %d", (int)err);
+        return false;
+    }
+    return true;
+}
+
+static float mq135_raw_to_rs(int raw) {
+    if (raw <= 0) {
+        return -1.0f;
+    }
+    if (raw >= 4095) {
+        raw = 4095;
+    }
+    return MQ135_RL_OHMS * ((4095.0f / (float)raw) - 1.0f);
+}
+
+static bool mq135_load_r0(void) {
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(MQ135_NVS_NS, NVS_READONLY, &handle);
+    if (err != ESP_OK) {
+        return false;
+    }
+    float stored = 0.0f;
+    size_t len = sizeof(stored);
+    err = nvs_get_blob(handle, MQ135_NVS_KEY_R0, &stored, &len);
+    nvs_close(handle);
+    if (err != ESP_OK || len != sizeof(stored) || stored <= 0.0f) {
+        return false;
+    }
+    mq135_r0 = stored;
+    return true;
+}
+
+static bool mq135_check_force_recalibrate(void) {
+    if (MQ135_FORCE_RECALIBRATE) {
+        return true;
+    }
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(MQ135_NVS_NS, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        return false;
+    }
+    uint8_t flag = 0;
+    err = nvs_get_u8(handle, MQ135_NVS_KEY_FORCE, &flag);
+    if (err == ESP_OK && flag == 1) {
+        nvs_erase_key(handle, MQ135_NVS_KEY_FORCE);
+        nvs_commit(handle);
+        nvs_close(handle);
+        return true;
+    }
+    nvs_close(handle);
+    return false;
+}
+
+static void mq135_save_r0(float r0) {
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(MQ135_NVS_NS, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "NVS open failed: %d", (int)err);
+        return;
+    }
+    err = nvs_set_blob(handle, MQ135_NVS_KEY_R0, &r0, sizeof(r0));
+    if (err == ESP_OK) {
+        nvs_commit(handle);
+    } else {
+        ESP_LOGW(TAG, "NVS set failed: %d", (int)err);
+    }
+    nvs_close(handle);
+}
+
+static int mq135_read_raw(void) {
+    if (!adc_handle) {
+        return -1;
+    }
+    int raw = -1;
+    if (adc_oneshot_read(adc_handle, mq135_channel, &raw) != ESP_OK) {
+        return -1;
+    }
+    return raw;
+}
+
+static void mq135_calibrate(void) {
+    float rs_sum = 0.0f;
+    int count = 0;
+    for (int i = 0; i < MQ135_CALIB_SAMPLES; i++) {
+        int raw = mq135_read_raw();
+        float rs = mq135_raw_to_rs(raw);
+        if (rs > 0.0f) {
+            rs_sum += rs;
+            count++;
+        }
+        vTaskDelay(pdMS_TO_TICKS(MQ135_CALIB_DELAY_MS));
+    }
+    if (count > 0) {
+        float rs_avg = rs_sum / (float)count;
+        mq135_r0 = rs_avg / MQ135_CLEAN_AIR_RATIO;
+        mq135_save_r0(mq135_r0);
+    }
+    ESP_LOGI(TAG, "MQ135 R0=%.2f (samples=%d)", mq135_r0, count);
+}
+
+static float mq135_ratio_to_ppm(float ratio, float a, float b) {
+    float ppm = a * powf(ratio, b);
+    if (ppm < 0.0f) {
+        ppm = 0.0f;
+    }
+    return ppm;
+}
+
+static bool mq135_raw_to_ppm(int raw, float *ppm_nh3, float *ppm_co, float *ppm_co2,
+                             float *out_rs, float *out_ratio) {
+    float rs = mq135_raw_to_rs(raw);
+    if (rs <= 0.0f || mq135_r0 <= 0.0f) {
+        return false;
+    }
+    float ratio = rs / mq135_r0;
+    if (out_rs) {
+        *out_rs = rs;
+    }
+    if (out_ratio) {
+        *out_ratio = ratio;
+    }
+    if (ppm_nh3) {
+        *ppm_nh3 = mq135_ratio_to_ppm(ratio, MQ135_NH3_A, MQ135_NH3_B);
+    }
+    if (ppm_co) {
+        *ppm_co = mq135_ratio_to_ppm(ratio, MQ135_CO_A, MQ135_CO_B);
+    }
+    if (ppm_co2) {
+        *ppm_co2 = mq135_ratio_to_ppm(ratio, MQ135_CO2_A, MQ135_CO2_B);
+    }
+    return true;
+}
+
+static void sensor_task(void *pvParameters) {
+    dht11_prepare_pin();
+    if (!adc_init()) {
+        ESP_LOGW(TAG, "ADC init failed, MQ135 disabled");
+    } else {
+        bool force_recal = mq135_check_force_recalibrate();
+        if (!force_recal && mq135_load_r0()) {
+            ESP_LOGI(TAG, "MQ135 R0 loaded from NVS: %.2f", mq135_r0);
+        } else {
+            if (force_recal) {
+                ESP_LOGI(TAG, "MQ135 force recalibrate requested");
+            }
+            mq135_calibrate();
+        }
+    }
+
+    while (true) {
+        if (mqtt_event_group) {
+            xEventGroupWaitBits(mqtt_event_group, MQTT_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+        }
+
+        int temperature = 0;
+        int humidity = 0;
+        bool dht_ok = dht11_read_median(&temperature, &humidity);
+        int gas_raw = mq135_read_raw();
+        float gas_nh3 = -1.0f;
+        float gas_co = -1.0f;
+        float gas_co2 = -1.0f;
+        float gas_rs = -1.0f;
+        float gas_ratio = -1.0f;
+        bool gas_ok = mq135_raw_to_ppm(gas_raw, &gas_nh3, &gas_co, &gas_co2, &gas_rs, &gas_ratio);
+
+        if (!dht_ok) {
+            ESP_LOGW(TAG, "DHT11 read failed");
+        }
+        if (gas_raw < 0) {
+            ESP_LOGW(TAG, "MQ135 read failed");
+        }
+
+        if (mqtt_client && MQTT_TOPIC_SENSOR && strlen(MQTT_TOPIC_SENSOR) > 0) {
+            char payload[220];
+            if (dht_ok) {
+                if (gas_ok) {
+                    snprintf(payload, sizeof(payload),
+                             "{\"temperature\":%d,\"humidity\":%d,\"gas\":%.1f,\"gas_raw\":%d,"
+                             "\"nh3\":%.1f,\"co\":%.1f,\"co2\":%.1f,\"rs\":%.1f,\"ratio\":%.3f}",
+                             temperature, humidity, gas_co2, gas_raw, gas_nh3, gas_co, gas_co2, gas_rs, gas_ratio);
+                } else {
+                    snprintf(payload, sizeof(payload),
+                             "{\"temperature\":%d,\"humidity\":%d,\"gas\":null,\"gas_raw\":%d,"
+                             "\"nh3\":null,\"co\":null,\"co2\":null,\"rs\":null,\"ratio\":null}",
+                             temperature, humidity, gas_raw);
+                }
+            } else {
+                if (gas_ok) {
+                    snprintf(payload, sizeof(payload),
+                             "{\"temperature\":null,\"humidity\":null,\"gas\":%.1f,\"gas_raw\":%d,"
+                             "\"nh3\":%.1f,\"co\":%.1f,\"co2\":%.1f,\"rs\":%.1f,\"ratio\":%.3f}",
+                             gas_co2, gas_raw, gas_nh3, gas_co, gas_co2, gas_rs, gas_ratio);
+                } else {
+                    snprintf(payload, sizeof(payload),
+                             "{\"temperature\":null,\"humidity\":null,\"gas\":null,\"gas_raw\":%d,"
+                             "\"nh3\":null,\"co\":null,\"co2\":null,\"rs\":null,\"ratio\":null}",
+                             gas_raw);
+                }
+            }
+            esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC_SENSOR, payload, 0, 0, 0);
+            ESP_LOGI(TAG, "MQTT sensor publish: %s", payload);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(SENSOR_PUBLISH_MS));
+    }
 }
 
 static void audio_close_socket(void) {
@@ -690,10 +1118,12 @@ extern "C" void app_main(void) {
         lcd_show_status("WIFI", "FAILED");
         return;
     }
+    mqtt_init();
     audio_init();
     setup_i2s();
     esp_sr_init();
     ESP_LOGI(TAG, "INMP411 analysis ready");
     lcd_show_idle();
     xTaskCreate(audio_task, "audio_task", 8192, NULL, 5, NULL);
+    xTaskCreate(sensor_task, "sensor_task", 4096, NULL, 4, NULL);
 }

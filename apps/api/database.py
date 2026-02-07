@@ -95,6 +95,83 @@ def get_latest_device_data(device_id: str):
             conn.close()
     return None
 
+def get_device_data_history(device_id: str, limit: int = 100):
+    conn = get_db_connection()
+    if not conn:
+        return []
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT payload, timestamp FROM device_data
+            WHERE device_id = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+        ''', (device_id, limit))
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            try:
+                payload = json.loads(row['payload'])
+            except json.JSONDecodeError:
+                payload = row['payload']
+            result.append({
+                "timestamp": row['timestamp'],
+                "data": payload
+            })
+        return result
+    except sqlite3.Error as e:
+        logger.error(f"Failed to fetch history: {e}")
+        return []
+    finally:
+        conn.close()
+
+def get_sensor_summary(device_id: str, hours: int = 24):
+    conn = get_db_connection()
+    if not conn:
+        return None
+    try:
+        cursor = conn.cursor()
+        cursor.execute(f'''
+            SELECT
+                MIN(json_extract(payload, '$.temperature')) as temp_min,
+                AVG(json_extract(payload, '$.temperature')) as temp_avg,
+                MAX(json_extract(payload, '$.temperature')) as temp_max,
+                MIN(json_extract(payload, '$.humidity')) as hum_min,
+                AVG(json_extract(payload, '$.humidity')) as hum_avg,
+                MAX(json_extract(payload, '$.humidity')) as hum_max,
+                MIN(json_extract(payload, '$.co2')) as co2_min,
+                AVG(json_extract(payload, '$.co2')) as co2_avg,
+                MAX(json_extract(payload, '$.co2')) as co2_max
+            FROM device_data
+            WHERE device_id = ?
+              AND timestamp >= datetime('now', '-{hours} hours')
+        ''', (device_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "temperature": {
+                "min": row["temp_min"],
+                "avg": row["temp_avg"],
+                "max": row["temp_max"],
+            },
+            "humidity": {
+                "min": row["hum_min"],
+                "avg": row["hum_avg"],
+                "max": row["hum_max"],
+            },
+            "co2": {
+                "min": row["co2_min"],
+                "avg": row["co2_avg"],
+                "max": row["co2_max"],
+            },
+        }
+    except sqlite3.Error as e:
+        logger.error(f"Summary query failed: {e}")
+        return None
+    finally:
+        conn.close()
+
 # --- Analytics Functions ---
 
 def get_energy_analytics(device_id: str, days: int = 1):
