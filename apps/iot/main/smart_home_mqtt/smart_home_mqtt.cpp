@@ -57,7 +57,7 @@ static const gpio_num_t I2C_SCL = GPIO_NUM_4;
 static const gpio_num_t I2C_SDA = GPIO_NUM_5;
 static const uint32_t I2C_CLK_HZ = 100000;
 static const gpio_num_t LED_PIN = GPIO_NUM_6;
-static const gpio_num_t DHT11_PIN = GPIO_NUM_1;
+static const gpio_num_t DHT11_PIN = GPIO_NUM_15;
 static const gpio_num_t MQ135_PIN = GPIO_NUM_2;
 
 static const int SAMPLE_RATE = 16000;

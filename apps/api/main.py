@@ -9,6 +9,7 @@ from database import (
     get_chat_history,
     get_last_messages,
     get_latest_device_data,
+    get_latest_sensor_with_values,
     get_device_data_history,
     get_sensor_summary,
 )
@@ -186,6 +187,20 @@ def get_sensor_latest(device_id: str = "esp32-main"):
     data = get_latest_device_data(device_id)
     if not data:
         raise HTTPException(status_code=404, detail="No sensor data found")
+    payload = data.get("data") if isinstance(data, dict) else None
+    if isinstance(payload, dict):
+        temp = payload.get("temperature")
+        hum = payload.get("humidity")
+        if temp is None and hum is None:
+            fallback = get_latest_sensor_with_values(device_id)
+            if fallback and isinstance(fallback.get("data"), dict):
+                old = fallback["data"]
+                payload = {**payload}
+                if old.get("temperature") is not None:
+                    payload["temperature"] = old.get("temperature")
+                if old.get("humidity") is not None:
+                    payload["humidity"] = old.get("humidity")
+                data = {**data, "data": payload}
     return {"device_id": device_id, **data}
 
 @app.get("/sensor/history")

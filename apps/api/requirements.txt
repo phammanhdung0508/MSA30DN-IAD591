@@ -4,3 +4,4 @@ pydantic
 paho-mqtt
 python-dotenv
 groq
+openai

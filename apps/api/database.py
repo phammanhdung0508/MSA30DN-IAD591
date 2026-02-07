@@ -95,6 +95,39 @@ def get_latest_device_data(device_id: str):
             conn.close()
     return None
 
+def get_latest_sensor_with_values(device_id: str):
+    conn = get_db_connection()
+    if not conn:
+        return None
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT payload, timestamp FROM device_data
+            WHERE device_id = ?
+              AND json_extract(payload, '$.temperature') IS NOT NULL
+              AND json_extract(payload, '$.humidity') IS NOT NULL
+            ORDER BY timestamp DESC
+            LIMIT 1
+        ''', (device_id,))
+        row = cursor.fetchone()
+        if row:
+            try:
+                return {
+                    "timestamp": row['timestamp'],
+                    "data": json.loads(row['payload'])
+                }
+            except json.JSONDecodeError:
+                return {
+                    "timestamp": row['timestamp'],
+                    "data": row['payload']
+                }
+        return None
+    except sqlite3.Error as e:
+        logger.error(f"Failed to fetch latest sensor values: {e}")
+        return None
+    finally:
+        conn.close()
+
 def get_device_data_history(device_id: str, limit: int = 100):
     conn = get_db_connection()
     if not conn:

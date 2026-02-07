@@ -1,55 +1,103 @@
-# Production Monorepo Architecture Design
+# Smart Home Voice Assistant Architecture
+
+This document reflects the current structure and runtime flow of the project in `C:\fsb\IAD591\Final`.
 
 ## Overview
-This architecture implements a hybrid monorepo supporting TypeScript (Frontend) and Python (Backend). It utilizes **pnpm** for package management (Node.js), **Conda** for Python environment management, and **Turborepo** for build orchestration.
+- **IoT (ESP32-S3)**: Wake word detection, sensor telemetry, and TCP audio streaming.
+- **API (FastAPI)**: Receives TCP audio, transcribes with Whisper, generates replies via Gemini, stores data in SQLite, and ingests MQTT telemetry.
+- **Web (Next.js)**: Mobile-first UI with Chat and Sensors tabs.
+- **Database**: SQLite stored at `packages/db/smarthome.db` initialized from `packages/db/schema.sql`.
 
-## Directory Structure
+## Repository Structure
 ```
 /
 ├── apps/
-│   ├── api/            # FastAPI backend (Python 3.11+)
-│   ├── mobile/         # React Native (Expo) app
-│   └── web/            # Web application (Next.js or Vite)
+│   ├── api/           # FastAPI backend (Python)
+│   ├── iot/           # ESP32-S3 firmware (ESP-IDF / PlatformIO)
+│   └── web/           # Next.js 14 UI
 ├── packages/
-│   ├── ui/             # Shared React UI components
-│   ├── api-client/     # Auto-generated TypeScript client from OpenAPI
-│   ├── tsconfig/       # Shared TypeScript configurations
-│   └── eslint-config/  # Shared Linting configurations
-├── tooling/
-│   └── scripts/        # Build/Generate scripts (e.g., OpenAPI generation)
-├── turbo.json          # Pipeline configuration
-├── pnpm-workspace.yaml # Workspace definitions
-└── package.json        # Root dependencies and scripts
+│   ├── db/            # SQLite DB + schema.sql
+│   ├── ui/            # Shared UI package
+│   ├── api-client/    # (Reserved) API client package
+│   ├── tsconfig/
+│   └── eslint-config/
+├── turbo.json
+├── pnpm-workspace.yaml
+└── package.json
 ```
 
-## Key Architectural Decisions
+## Runtime Architecture
+### 1) Audio + Wake Word Flow
+```
+ESP32 WakeNet/VAD -> TCP audio stream -> FastAPI TCP recorder -> WAV file
+-> Whisper transcription -> Gemini response -> SQLite chat_messages
+```
 
-### 1. Build System & Workflow
-- **Turborepo** controls the lifecycle (build, test, lint, dev).
-- **pnpm workspaces** manages Node.js dependencies and linking.
-- **Conda** manages Python environment and dependencies within `apps/api` (using `environment.yml`).
+### 2) MQTT Telemetry Flow
+```
+ESP32 publishes MQTT (sensor/temp_humid_msa_assign1)
+-> FastAPI MQTT client subscribes
+-> Device data stored in SQLite device_data
+```
 
-### 2. Type Safety & API Contract
-- **Source of Truth**: The FastAPI backend (`apps/api`).
-- **Generation Flow**:
-    1. `packages/api-client` runs a script to fetch/read this schema.
-    2. `packages/api-client` uses a generator (e.g., `openapi-typescript-codegen`) to produce typed SDKs.
-    3. `apps/web` and `apps/mobile` consume `packages/api-client` directly.
+### 3) Web UI Flow
+```
+Next.js UI -> FastAPI REST
+/chat/* for conversations
+/sensor/* for telemetry summaries
+```
 
-### 3. Frontend Architecture
-- **Shared UI**: `packages/ui` exports a Component Library (likely using Tamagui, NativeBase, or React Native Paper + Web support for unified code, or just separated logic if preferring distinct UIs).
-- **Mobile**: Uses Expo for rapid development and OTA updates.
-- **Web**: Uses Next.js/Vite for performance.
+## Key Components
+### IoT Firmware (apps/iot)
+- **Wake word**: ESP-SR (WakeNet + VAD) model loaded from `srmodels.bin`.
+- **Audio stream**: TCP packets with headers `STRT`, `AUD0`, `STOP`.
+- **Sensors**: DHT11 + MQ135; publishes JSON to MQTT topic.
+- **Config**: `sdkconfig` / `sdkconfig.esp32-s3-devkitc-1-idf` for WiFi, MQTT, audio host/port.
 
-### 4. Backend Architecture
-- **Framework**: FastAPI for async performance and auto-docs.
-- **Validation**: Pydantic models (shared easily via OpenAPI).
-- **DevEx**: Live reload via `uvicorn`.
+### Backend API (apps/api)
+- **TCP Audio**: `audio_tcp.py` accepts audio and saves WAV.
+- **Whisper**: `whisper_worker.py` transcribes and triggers Gemini.
+- **Gemini**: `gemini_client.py` uses REST API key from env.
+- **MQTT**: `mqtt_client.py` ingests telemetry and stores into SQLite.
+- **REST Endpoints**:
+  - `POST /chat/session`
+  - `POST /chat/message`
+  - `GET /chat/session/{id}`
+  - `GET /chat/last`
+  - `GET /chat/status`
+  - `GET /sensor/latest`
+  - `GET /sensor/history`
+  - `GET /sensor/summary`
 
-## CI/CD Pipeline Strategy
-- **Caching**: Turbo Remote Caching to avoid rebuilding unchanged packages.
-- **Pruning**: `turbo prune --scope=<target>` to create Docker slices for deployment.
-- **Deployment**:
-    - **API**: Dockerized Python container (built from pruned context).
-    - **Web**: Vercel or Dockerized node container.
-    - **Mobile**: EAS (Expo Application Services) Build.
+### Database (packages/db)
+- **device_data**: MQTT telemetry and device payloads.
+- **chat_sessions / chat_messages**: Chat history (web + device).
+- **schedules**: Reserved for automation schedules.
+
+## Environment Configuration
+Backend (`apps/api/.env`):
+```
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-2.5-flash
+WHISPER_ENABLED=1
+WHISPER_MODEL=base
+WHISPER_LANGUAGE=
+WHISPER_TASK=transcribe
+AUDIO_TCP_ENABLED=1
+AUDIO_TCP_HOST=0.0.0.0
+AUDIO_TCP_PORT=3334
+CHAT_DEVICE_SESSION_ID=device
+CHAT_DEFAULT_SESSION_ID=device
+MQTT_BROKER_URL=mqtt://localhost:1883
+MQTT_SUB_TOPICS=sensor/temp_humid_msa_assign1,smart-home/+/+/+/+
+```
+
+## Build & Run (Summary)
+- **Root**: `pnpm dev` (turbo) runs web + api.
+- **API only**: `uvicorn main:app --reload --port 8000`
+- **Web only**: `pnpm dev` in `apps/web`
+- **IoT**: Build/flash with PlatformIO in `apps/iot`
+
+## Notes
+- MQTT topic defaults align with Arduino-style payloads and are ingested as telemetry.
+- Audio config keys on ESP32 still use `AUDIO_UDP_*` naming but the transport is TCP.
