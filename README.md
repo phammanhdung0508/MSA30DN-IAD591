@@ -1,4 +1,4 @@
-﻿?# Smart Home Voice Assistant
+﻿# Smart Home Voice Assistant
 
 Hệ thống Smart Home điều khiển bằng giọng nói, kết nối ESP32 (wake-word) với FastAPI (Whisper + Gemini) và UI web mobile-first để hiển thị hội thoại và dữ liệu cảm biến.
 
@@ -147,7 +147,7 @@ flowchart TB
   subgraph Chat
     CS[POST /chat/session]
     GM[POST /chat/message]
-    CH[GET /chat/session/{id}]
+    CH["GET /chat/session/{id}"]
     CL[GET /chat/last]
     ST[GET /chat/status]
   end
