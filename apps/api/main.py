@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List
@@ -12,6 +12,10 @@ from database import (
     get_latest_sensor_with_values,
     get_device_data_history,
     get_sensor_summary,
+    get_energy_analytics,
+    get_temp_analytics,
+    get_schedule,
+    save_schedule,
 )
 import logging
 import os
@@ -74,17 +78,17 @@ tcp_recorder = TcpAudioRecorder(
     whisper_worker=whisper_worker,
 )
 
-# class ACControlParams(BaseModel):
-#     power: bool = True
-#     temperature: int = 24
-#     mode: str = "cool"
-#     fanSpeed: int = 2
-#
-# class DeviceCommand(BaseModel):
-#     zone: str = "living-room"
-#     device_type: str = "ac"
-#     device_id: str = "daikin-x"
-#     params: ACControlParams
+class ACControlParams(BaseModel):
+    power: bool = True
+    temperature: int = 24
+    mode: str = "cool"
+    fanSpeed: int = 2
+
+class DeviceCommand(BaseModel):
+    zone: str = "living-room"
+    device_type: str = "ac"
+    device_id: str = "daikin-x"
+    params: ACControlParams
 
 class ScheduleData(BaseModel):
     schedule: List[List[bool]] # 7x24 grid
@@ -219,127 +223,127 @@ def get_sensor_summary_endpoint(device_id: str = "esp32-main", hours: int = 24):
         raise HTTPException(status_code=404, detail="No sensor data found")
     return {"device_id": device_id, "hours": hours, "summary": summary}
 
-# @app.get("/")
-# def read_root():
-#     return {"Hello": "Smart Home API", "Status": "MQTT Service Running"}
+@app.get("/")
+def read_root():
+    return {"Hello": "Smart Home API", "Status": "MQTT Service Running"}
 
 # In-memory state store to persist command state (Power, Mode, etc.) since sensor only sends Telemetry
-# DEVICE_STATES = {}
+DEVICE_STATES = {}
 
-# @app.get("/ac/{device_id}/status")
-# def get_ac_status(device_id: str):
-#     """
-#     Retrieve the latest status of an AC unit from the database.
-#     """
-#     db_result = get_latest_device_data(device_id)
-#
-#     # Base state from memory (or default)
-#     base_state = DEVICE_STATES.get(device_id, {
-#         "power": False,
-#         "temperature": 24, # Target temp
-#         "currentTemperature": 24, # Sensor temp
-#         "outdoorTemperature": 32.0,
-#         "mode": "cool",
-#         "fanSpeed": 2,
-#         "humidity": 50,
-#         "powerUsage": 0
-#     })
-#
-#     # Create a copy to return
-#     img_state = base_state.copy()
-#
-#     if db_result:
-#         # payload from DB
-#         payload = db_result.get("data", {})
-#
-#         # Merge payload into default state
-#         # Map specific sensor fields if needed
-#         if "temperature" in payload:
-#             img_state["currentTemperature"] = payload["temperature"]
-#         if "humidity" in payload:
-#             img_state["humidity"] = payload["humidity"]
-#
-#         # If payload contains state (from other sources)
-#         if "power" in payload: img_state["power"] = payload["power"]
-#         if "mode" in payload: img_state["mode"] = payload["mode"]
-#         if "fanSpeed" in payload: img_state["fanSpeed"] = payload["fanSpeed"]
-#
-#         return {
-#             "timestamp": db_result.get("timestamp"),
-#             "data": img_state
-#         }
-#
-#     # Return default/mock if no data found yet
-#     return {
-#         "timestamp": None,
-#         "data": img_state
-#     }
+@app.get("/ac/{device_id}/status")
+def get_ac_status(device_id: str):
+    """
+    Retrieve the latest status of an AC unit from the database.
+    """
+    db_result = get_latest_device_data(device_id)
 
-# @app.post("/ac/control")
-# def control_ac(cmd: DeviceCommand):
-#     """
-#     Sends a control command to a specific device via MQTT.
-#     Topic: smart-home/{zone}/{device_type}/{device_id}/command
-#     """
-#     payload = {
-#         "method": "set_state",
-#         "params": cmd.params.dict()
-#     }
-#
-#     # Update memory state to persist command
-#     current = DEVICE_STATES.get(cmd.device_id, {
-#         "power": False,
-#         "temperature": 24,
-#         "mode": "cool",
-#         "fanSpeed": 2,
-#         "currentTemperature": 24, # Sensor temp
-#         "outdoorTemperature": 32.0,
-#         "humidity": 50,
-#         "powerUsage": 0
-#     })
-#     current.update(cmd.params.dict())
-#     DEVICE_STATES[cmd.device_id] = current
-#
-#     success = mqtt_client.send_command(cmd.zone, cmd.device_type, cmd.device_id, payload)
-#
-#     if success:
-#         return {
-#             "status": "success",
-#             "target": f"{cmd.zone}/{cmd.device_type}/{cmd.device_id}",
-#             "command": payload
-#         }
-#     raise HTTPException(status_code=500, detail="Failed to publish message to MQTT broker")
+    # Base state from memory (or default)
+    base_state = DEVICE_STATES.get(device_id, {
+        "power": False,
+        "temperature": 24, # Target temp
+        "currentTemperature": 24, # Sensor temp
+        "outdoorTemperature": 32.0,
+        "mode": "cool",
+        "fanSpeed": 2,
+        "humidity": 50,
+        "powerUsage": 0
+    })
 
-# @app.post("/test/publish")
-# def test_publish(topic: str, message: dict = Body(...)):
-#     """
-#     Test endpoint to publish arbitrary messages.
-#     """
-#     success = mqtt_client.publish(topic, message)
-#     if success:
-#         return {"status": "success", "topic": topic, "payload": message}
-#     return {"status": "error", "message": "Failed to publish"}
+    # Create a copy to return
+    img_state = base_state.copy()
+
+    if db_result:
+        # payload from DB
+        payload = db_result.get("data", {})
+
+        # Merge payload into default state
+        # Map specific sensor fields if needed
+        if "temperature" in payload:
+            img_state["currentTemperature"] = payload["temperature"]
+        if "humidity" in payload:
+            img_state["humidity"] = payload["humidity"]
+
+        # If payload contains state (from other sources)
+        if "power" in payload: img_state["power"] = payload["power"]
+        if "mode" in payload: img_state["mode"] = payload["mode"]
+        if "fanSpeed" in payload: img_state["fanSpeed"] = payload["fanSpeed"]
+
+        return {
+            "timestamp": db_result.get("timestamp"),
+            "data": img_state
+        }
+
+    # Return default/mock if no data found yet
+    return {
+        "timestamp": None,
+        "data": img_state
+    }
+
+@app.post("/ac/control")
+def control_ac(cmd: DeviceCommand):
+    """
+    Sends a control command to a specific device via MQTT.
+    Topic: smart-home/{zone}/{device_type}/{device_id}/command
+    """
+    payload = {
+        "method": "set_state",
+        "params": cmd.params.model_dump()
+    }
+
+    # Update memory state to persist command
+    current = DEVICE_STATES.get(cmd.device_id, {
+        "power": False,
+        "temperature": 24,
+        "mode": "cool",
+        "fanSpeed": 2,
+        "currentTemperature": 24, # Sensor temp
+        "outdoorTemperature": 32.0,
+        "humidity": 50,
+        "powerUsage": 0
+    })
+    current.update(cmd.params.model_dump())
+    DEVICE_STATES[cmd.device_id] = current
+
+    success = mqtt_client.send_command(cmd.zone, cmd.device_type, cmd.device_id, payload)
+
+    if success:
+        return {
+            "status": "success",
+            "target": f"{cmd.zone}/{cmd.device_type}/{cmd.device_id}",
+            "command": payload
+        }
+    raise HTTPException(status_code=500, detail="Failed to publish message to MQTT broker")
+
+@app.post("/test/publish")
+def test_publish(topic: str, message: dict = Body(...)):
+    """
+    Test endpoint to publish arbitrary messages.
+    """
+    success = mqtt_client.publish(topic, message)
+    if success:
+        return {"status": "success", "topic": topic, "payload": message}
+    return {"status": "error", "message": "Failed to publish"}
 
 # --- New Endpoints ---
 
-# @app.get("/analytics/energy/{device_id}")
-# def get_energy(device_id: str):
-#     return {"data": get_energy_analytics(device_id)}
+@app.get("/analytics/energy/{device_id}")
+def get_energy(device_id: str):
+    return {"data": get_energy_analytics(device_id)}
 
-# @app.get("/analytics/temperature/{device_id}")
-# def get_temperature(device_id: str):
-#     return {"data": get_temp_analytics(device_id)}
+@app.get("/analytics/temperature/{device_id}")
+def get_temperature(device_id: str):
+    return {"data": get_temp_analytics(device_id)}
 
-# @app.get("/schedule/{device_id}")
-# def get_device_schedule(device_id: str):
-#     schedule = get_schedule(device_id)
-#     return {"schedule": schedule}
+@app.get("/schedule/{device_id}")
+def get_device_schedule(device_id: str):
+    schedule = get_schedule(device_id)
+    return {"schedule": schedule}
 
-# @app.post("/schedule/{device_id}")
-# def save_device_schedule(device_id: str, data: ScheduleData):
-#     if not _is_valid_schedule_grid(data.schedule):
-#         raise HTTPException(status_code=400, detail="Schedule must be a 7x24 boolean grid")
-#     success = save_schedule(device_id, data.schedule)
-#     if success:
-#         return {"status": "success"}
-#     raise HTTPException(status_code=500, detail="Failed to save schedule")
+@app.post("/schedule/{device_id}")
+def save_device_schedule(device_id: str, data: ScheduleData):
+    if not _is_valid_schedule_grid(data.schedule):
+        raise HTTPException(status_code=400, detail="Schedule must be a 7x24 boolean grid")
+    success = save_schedule(device_id, data.schedule)
+    if success:
+        return {"status": "success"}
+    raise HTTPException(status_code=500, detail="Failed to save schedule")
