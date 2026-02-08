@@ -6,6 +6,7 @@ import {
     getChatLast,
     getChatSessionHistory,
     getChatStatus,
+    postChatMessage,
     type ChatMessage as ApiChatMessage,
     type ChatStatus,
 } from "@/lib/api";
@@ -15,6 +16,13 @@ type ChatMessage = {
     role: "user" | "assistant";
     text: string;
     time?: string;
+};
+
+type RoomCommandPayload = {
+    id: number;
+    text: string;
+    source: "chat";
+    ts: string;
 };
 
 const parseTimestamp = (ts?: string) => {
@@ -45,8 +53,37 @@ export function ChatView() {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [sessionId, setSessionId] = useState<string | null>(null);
     const [status, setStatus] = useState<ChatStatus | null>(null);
+    const [input, setInput] = useState("");
+    const [isSending, setIsSending] = useState(false);
     const listRef = useRef<HTMLDivElement>(null);
     const lastMessageRef = useRef<string>("");
+
+    const formatNow = () =>
+        new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+
+    const appendMessage = (message: ChatMessage) => {
+        setMessages((prev) => [...prev, message]);
+    };
+
+    const broadcastRoomCommand = (text: string) => {
+        if (typeof window === "undefined") return;
+        const payload: RoomCommandPayload = {
+            id: Date.now(),
+            text,
+            source: "chat",
+            ts: new Date().toISOString(),
+        };
+        try {
+            const raw = window.localStorage.getItem("room_command_queue");
+            const queue = raw ? JSON.parse(raw) : [];
+            const next = Array.isArray(queue) ? [...queue, payload] : [payload];
+            window.localStorage.setItem("room_command_queue", JSON.stringify(next.slice(-20)));
+            window.localStorage.setItem("room_command_last", JSON.stringify(payload));
+        } catch {
+            // Ignore localStorage issues; still emit event below.
+        }
+        window.dispatchEvent(new CustomEvent("room-command", { detail: payload }));
+    };
 
     useEffect(() => {
         const loadLast = async () => {
@@ -93,6 +130,54 @@ export function ChatView() {
         const full = await getChatSessionHistory(sessionId, 200);
         if (full) {
             setMessages(full.messages.map(toMessage));
+        }
+    };
+
+    const handleSend = async () => {
+        const text = input.trim();
+        if (!text || isSending) return;
+        setInput("");
+        setIsSending(true);
+
+        const optimistic: ChatMessage = {
+            id: `local-${Date.now()}`,
+            role: "user",
+            text,
+            time: formatNow(),
+        };
+        appendMessage(optimistic);
+        broadcastRoomCommand(text);
+
+        try {
+            const res = await postChatMessage(text, sessionId ?? undefined, "web");
+            if (!res) {
+                throw new Error("No response");
+            }
+            if (res.session_id) setSessionId(res.session_id);
+            if (res.assistant_text) {
+                appendMessage({
+                    id: `assistant-${Date.now()}`,
+                    role: "assistant",
+                    text: res.assistant_text,
+                    time: formatNow(),
+                });
+            } else if (res.error) {
+                appendMessage({
+                    id: `assistant-${Date.now()}`,
+                    role: "assistant",
+                    text: res.error,
+                    time: formatNow(),
+                });
+            }
+        } catch (error) {
+            appendMessage({
+                id: `assistant-${Date.now()}`,
+                role: "assistant",
+                text: "Unable to send right now.",
+                time: formatNow(),
+            });
+        } finally {
+            setIsSending(false);
         }
     };
 
@@ -166,6 +251,35 @@ export function ChatView() {
             </main>
 
             <footer className="px-5 pb-6 pt-3">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-2">
+                    <div className="flex items-center gap-2">
+                        <input
+                            value={input}
+                            onChange={(event) => setInput(event.target.value)}
+                            onKeyDown={(event) => {
+                                if (event.key === "Enter" && !event.shiftKey) {
+                                    event.preventDefault();
+                                    handleSend();
+                                }
+                            }}
+                            placeholder="Type a message..."
+                            className="flex-1 bg-transparent px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none"
+                        />
+                        <button
+                            type="button"
+                            onClick={handleSend}
+                            disabled={isSending || !input.trim()}
+                            className={cn(
+                                "rounded-xl px-4 py-2 text-xs font-semibold uppercase tracking-widest transition",
+                                isSending || !input.trim()
+                                    ? "bg-white/5 text-slate-500"
+                                    : "bg-cyan-500/80 text-white hover:bg-cyan-500"
+                            )}
+                        >
+                            {isSending ? "Sending" : "Send"}
+                        </button>
+                    </div>
+                </div>
                 <div className="mt-3 text-[11px] text-slate-500">2026.</div>
             </footer>
         </div>

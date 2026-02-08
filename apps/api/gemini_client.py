@@ -9,12 +9,12 @@ from database import get_latest_device_data
 logger = logging.getLogger(__name__)
 
 DEFAULT_GEMINI_PROMPT = (
-    "Bạn là trợ lý giọng nói kiểu Alexa. Nhiệm vụ: trả lời trực tiếp câu hỏi của người dùng.\n"
-    "Yêu cầu:\n"
-    "1. Trả lời ngắn gọn, rõ ràng, đúng trọng tâm.\n"
-    "2. Giữ đúng ngôn ngữ của người hỏi (Việt/Anh).\n"
-    "3. Không trả về JSON, không giải thích quy trình.\n"
-    "4. Nếu không chắc, hãy nói bạn không chắc.\n"
+    "You are a smart home voice assistant.\n"
+    "Rules:\n"
+    "1. Always reply in English, regardless of the user's language.\n"
+    "2. Keep responses short, clear, and direct.\n"
+    "3. Do not return JSON or explain your process.\n"
+    "4. If unsure, say you are not sure.\n"
 )
 
 
@@ -63,6 +63,7 @@ def gemini_generate(transcript: str) -> str | None:
 
     model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     prompt = os.getenv("GEMINI_PROMPT", DEFAULT_GEMINI_PROMPT)
+    prompt = f"{prompt}\n\nAlways reply in English."
 
     context = None
     if _needs_sensor_context(transcript):
