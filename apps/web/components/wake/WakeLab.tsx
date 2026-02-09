@@ -1,29 +1,29 @@
 // /*
 // "use client";
-// 
+//
 // import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // import { GlassCard } from "@/components/shared/GlassCard";
 // import { Mic, Wifi, Radio, AlertTriangle, Loader2, Send, PlugZap } from "lucide-react";
-// 
+//
 // type MqttStatus = "disconnected" | "connecting" | "connected" | "error";
 // type StreamStatus = "idle" | "connecting" | "streaming" | "error";
-// 
+//
 // const DEFAULT_WAKE_PHRASE = "hey esp";
 // const DEFAULT_MQTT_URL = process.env.NEXT_PUBLIC_MQTT_WS_URL || "wss://localhost:8884/mqtt";
 // const DEFAULT_MQTT_TOPIC = process.env.NEXT_PUBLIC_MQTT_TOPIC || "sensor/wake_trigger_msa_assign1";
 // const DEFAULT_WS_URL = process.env.NEXT_PUBLIC_AUDIO_BRIDGE_URL || "ws://localhost:8080";
-// 
+//
 // export function WakeLab() {
 //     const [mqttUrl, setMqttUrl] = useState(DEFAULT_MQTT_URL);
 //     const [mqttTopic, setMqttTopic] = useState(DEFAULT_MQTT_TOPIC);
 //     const [mqttStatus, setMqttStatus] = useState<MqttStatus>("disconnected");
 //     const [mqttError, setMqttError] = useState<string | null>(null);
 //     const mqttClientRef = useRef<any>(null);
-// 
+//
 //     const [wakePhrase, setWakePhrase] = useState(DEFAULT_WAKE_PHRASE);
 //     const [listening, setListening] = useState(false);
 //     const recognitionRef = useRef<any>(null);
-// 
+//
 //     const [wsUrl, setWsUrl] = useState(DEFAULT_WS_URL);
 //     const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
 //     const wsRef = useRef<WebSocket | null>(null);
@@ -31,25 +31,25 @@
 //     const processorRef = useRef<ScriptProcessorNode | null>(null);
 //     const mediaStreamRef = useRef<MediaStream | null>(null);
 //     const targetSampleRate = 16000;
-// 
+//
 //     const [listenStatus, setListenStatus] = useState<StreamStatus>("idle");
 //     const wsListenRef = useRef<WebSocket | null>(null);
 //     const listenCtxRef = useRef<AudioContext | null>(null);
 //     const listenProcessorRef = useRef<ScriptProcessorNode | null>(null);
 //     const audioQueueRef = useRef<Float32Array[]>([]);
-// 
+//
 //     const canUseSpeechApi = useMemo(() => {
 //         if (typeof window === "undefined") return false;
 //         return "webkitSpeechRecognition" in window || "SpeechRecognition" in window;
 //     }, []);
-// 
+//
 //     const connectMqtt = useCallback(async () => {
 //         if (mqttClientRef.current) {
 //             mqttClientRef.current.end(true);
 //         }
 //         setMqttStatus("connecting");
 //         setMqttError(null);
-// 
+//
 //         try {
 //             const mqtt = await import("mqtt");
 //             const clientId = `web-wake-${Math.random().toString(16).slice(2)}`;
@@ -59,7 +59,7 @@
 //                 clean: true,
 //             });
 //             mqttClientRef.current = client;
-// 
+//
 //             client.on("connect", () => {
 //                 setMqttStatus("connected");
 //                 setMqttError(null);
@@ -75,7 +75,7 @@
 //             setMqttError(err?.message || "Failed to load MQTT client");
 //         }
 //     }, [mqttUrl]);
-// 
+//
 //     const disconnectMqtt = useCallback(() => {
 //         if (mqttClientRef.current) {
 //             mqttClientRef.current.end(true);
@@ -83,13 +83,13 @@
 //         }
 //         setMqttStatus("disconnected");
 //     }, []);
-// 
+//
 //     const publishWake = useCallback(() => {
 //         const client = mqttClientRef.current;
 //         if (!client || mqttStatus !== "connected") return;
 //         client.publish(mqttTopic, "WAKE", { qos: 0 });
 //     }, [mqttStatus, mqttTopic]);
-// 
+//
 //     const startListening = useCallback(() => {
 //         if (!canUseSpeechApi) return;
 //         const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -112,7 +112,7 @@
 //         recognitionRef.current = recognition;
 //         setListening(true);
 //     }, [canUseSpeechApi, publishWake, wakePhrase]);
-// 
+//
 //     const stopListening = useCallback(() => {
 //         if (recognitionRef.current) {
 //             recognitionRef.current.stop();
@@ -120,7 +120,7 @@
 //         }
 //         setListening(false);
 //     }, []);
-// 
+//
 //     const downsampleTo16k = (input: Float32Array, inputRate: number) => {
 //         if (inputRate === targetSampleRate) return input;
 //         const ratio = inputRate / targetSampleRate;
@@ -136,11 +136,11 @@
 //         }
 //         return output;
 //     };
-// 
+//
 //     const startStreaming = useCallback(async () => {
 //         if (streamStatus === "streaming") return;
 //         setStreamStatus("connecting");
-// 
+//
 //         try {
 //             const ws = new WebSocket(wsUrl);
 //             ws.binaryType = "arraybuffer";
@@ -150,11 +150,11 @@
 //                 mediaStreamRef.current = stream;
 //                 const ctx = new AudioContext();
 //                 audioCtxRef.current = ctx;
-// 
+//
 //                 const source = ctx.createMediaStreamSource(stream);
 //                 const processor = ctx.createScriptProcessor(4096, 1, 1);
 //                 processorRef.current = processor;
-// 
+//
 //                 processor.onaudioprocess = (event) => {
 //                     if (ws.readyState !== WebSocket.OPEN) return;
 //                     const input = event.inputBuffer.getChannelData(0);
@@ -166,7 +166,7 @@
 //                     }
 //                     ws.send(pcm.buffer);
 //                 };
-// 
+//
 //                 source.connect(processor);
 //                 processor.connect(ctx.destination);
 //                 setStreamStatus("streaming");
@@ -177,7 +177,7 @@
 //             setStreamStatus("error");
 //         }
 //     }, [streamStatus, wsUrl]);
-// 
+//
 //     const stopStreaming = useCallback(() => {
 //         if (wsRef.current) {
 //             wsRef.current.close();
@@ -197,20 +197,20 @@
 //         }
 //         setStreamStatus("idle");
 //     }, []);
-// 
+//
 //     const startListeningFromEsp = useCallback(() => {
 //         if (listenStatus === "streaming") return;
 //         setListenStatus("connecting");
-// 
+//
 //         try {
 //             const ws = new WebSocket(wsUrl);
 //             ws.binaryType = "arraybuffer";
 //             wsListenRef.current = ws;
-// 
+//
 //             ws.onopen = () => {
 //                 const ctx = new AudioContext({ sampleRate: targetSampleRate });
 //                 listenCtxRef.current = ctx;
-// 
+//
 //                 const processor = ctx.createScriptProcessor(4096, 1, 1);
 //                 listenProcessorRef.current = processor;
 //                 processor.onaudioprocess = (event) => {
@@ -235,7 +235,7 @@
 //                 processor.connect(ctx.destination);
 //                 setListenStatus("streaming");
 //             };
-// 
+//
 //             ws.onmessage = (event) => {
 //                 const data = event.data;
 //                 if (!(data instanceof ArrayBuffer)) return;
@@ -252,7 +252,7 @@
 //             setListenStatus("error");
 //         }
 //     }, [listenStatus, targetSampleRate, wsUrl]);
-// 
+//
 //     const stopListeningFromEsp = useCallback(() => {
 //         if (wsListenRef.current) {
 //             wsListenRef.current.close();
@@ -269,7 +269,7 @@
 //         audioQueueRef.current = [];
 //         setListenStatus("idle");
 //     }, []);
-// 
+//
 //     useEffect(() => {
 //         return () => {
 //             disconnectMqtt();
@@ -278,14 +278,14 @@
 //             stopListeningFromEsp();
 //         };
 //     }, [disconnectMqtt, stopListening, stopStreaming, stopListeningFromEsp]);
-// 
+//
 //     return (
 //         <div className="max-w-6xl mx-auto space-y-6">
 //             <header>
 //                 <h1 className="text-3xl font-bold text-white">Wake Lab</h1>
 //                 <p className="text-slate-400 mt-1">Trigger ESP32 wake via MQTT (A) or stream audio via UDP bridge (B)</p>
 //             </header>
-// 
+//
 //             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
 //                 <GlassCard className="p-6 space-y-6">
 //                     <div className="flex items-center gap-3">
@@ -297,7 +297,7 @@
 //                             <p className="text-xs text-slate-400">Web detects keyword and publishes to MQTT</p>
 //                         </div>
 //                     </div>
-// 
+//
 //                     <div className="space-y-3">
 //                         <label className="text-xs text-slate-400 uppercase tracking-wider">Broker (WebSocket)</label>
 //                         <input
@@ -314,7 +314,7 @@
 //                             placeholder="sensor/wake_trigger_msa_assign1"
 //                         />
 //                     </div>
-// 
+//
 //                     <div className="flex items-center gap-3">
 //                         {mqttStatus === "connecting" && <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />}
 //                         {mqttStatus === "connected" && <div className="w-2 h-2 rounded-full bg-emerald-400" />}
@@ -322,7 +322,7 @@
 //                         <span className="text-sm text-slate-300 capitalize">{mqttStatus}</span>
 //                     </div>
 //                     {mqttError && <div className="text-xs text-amber-400">{mqttError}</div>}
-// 
+//
 //                     <div className="flex flex-wrap gap-3">
 //                         <button
 //                             onClick={connectMqtt}
@@ -346,7 +346,7 @@
 //                             Trigger Wake
 //                         </button>
 //                     </div>
-// 
+//
 //                     <div className="pt-4 border-t border-white/10 space-y-3">
 //                         <div className="flex items-center gap-2 text-sm text-slate-300">
 //                             <Mic className="w-4 h-4 text-cyan-400" />
@@ -374,7 +374,7 @@
 //                         )}
 //                     </div>
 //                 </GlassCard>
-// 
+//
 //                 <GlassCard className="p-6 space-y-6">
 //                     <div className="flex items-center gap-3">
 //                         <div className="p-2 rounded-lg bg-purple-500/10 text-purple-400">
@@ -385,7 +385,7 @@
 //                             <p className="text-xs text-slate-400">Browser -> WebSocket bridge -> UDP to ESP32</p>
 //                         </div>
 //                     </div>
-// 
+//
 //                     <div className="space-y-3">
 //                         <label className="text-xs text-slate-400 uppercase tracking-wider">Bridge WebSocket URL</label>
 //                         <input
@@ -395,14 +395,14 @@
 //                             placeholder="ws://localhost:8080"
 //                         />
 //                     </div>
-// 
+//
 //                     <div className="flex items-center gap-3">
 //                         {streamStatus === "connecting" && <Loader2 className="w-4 h-4 text-purple-400 animate-spin" />}
 //                         {streamStatus === "streaming" && <div className="w-2 h-2 rounded-full bg-emerald-400" />}
 //                         {streamStatus === "error" && <AlertTriangle className="w-4 h-4 text-amber-400" />}
 //                         <span className="text-sm text-slate-300 capitalize">{streamStatus}</span>
 //                     </div>
-// 
+//
 //                     <div className="flex gap-3">
 //                         <button
 //                             onClick={startStreaming}
@@ -417,7 +417,7 @@
 //                             Stop
 //                         </button>
 //                     </div>
-// 
+//
 //                     <div className="pt-4 border-t border-white/10 space-y-3">
 //                         <div className="text-sm text-slate-300">Listen From ESP32 (UDP → WS)</div>
 //                         <div className="flex gap-3">
@@ -438,7 +438,7 @@
 //                             Requires ws-udp-bridge with --listen and ESP32 sending PCM 16kHz mono.
 //                         </div>
 //                     </div>
-// 
+//
 //                     <div className="text-xs text-slate-400 leading-relaxed">
 //                         Requires the UDP bridge script on your machine. The bridge forwards raw PCM 16kHz
 //                         mono audio to ESP32 UDP port 3333 and can relay UDP audio from ESP32 to WebSocket
@@ -450,12 +450,11 @@
 //     );
 // }
 // */
-// 
+//
 // export function WakeLab() {
 //     return null;
 // }
 
 export function WakeLab() {
-    return null;
+  return null;
 }
-
