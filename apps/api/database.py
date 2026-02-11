@@ -220,17 +220,17 @@ def get_energy_analytics(device_id: str, days: int = 1):
         # SQLite json_extract might vary by version, but this is standard for recent ones.
         # We group by hour and take average of powerUsage.
         # timestamp format: YYYY-MM-DD HH:MM:SS
-        cursor.execute(f'''
+        cursor.execute('''
             SELECT 
                 strftime('%H:00', timestamp) as time_bucket,
                 AVG(json_extract(payload, '$.powerUsage')) as avg_usage,
                 MAX(json_extract(payload, '$.power')) as was_active
             FROM device_data
             WHERE device_id = ? 
-              AND timestamp >= datetime('now', '-{days} days')
+              AND timestamp >= datetime('now', ?)
             GROUP BY time_bucket
             ORDER BY time_bucket ASC
-        ''', (device_id,))
+        ''', (device_id, f"-{days} days"))
         
         rows = cursor.fetchall()
         result = []
@@ -260,16 +260,16 @@ def get_temp_analytics(device_id: str, days: int = 1):
     try:
         cursor = conn.cursor()
         # Group by Hour for proper time trend
-        cursor.execute(f'''
+        cursor.execute('''
             SELECT 
                 strftime('%Y-%m-%d %H:00', timestamp) as time_bucket,
                 AVG(json_extract(payload, '$.temperature')) as avg_indoor
             FROM device_data
             WHERE device_id = ?
-              AND timestamp >= datetime('now', '-{days} days')
+              AND timestamp >= datetime('now', ?)
             GROUP BY time_bucket
             ORDER BY time_bucket ASC
-        ''', (device_id,))
+        ''', (device_id, f"-{days} days"))
         
         rows = cursor.fetchall()
         result = []
