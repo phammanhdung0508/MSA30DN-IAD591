@@ -10,9 +10,11 @@ logger = logging.getLogger(__name__)
 # Define paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(BASE_DIR))
-DB_DIR = os.path.join(PROJECT_ROOT, "packages", "db")
-DB_PATH = os.path.join(DB_DIR, "smarthome.db")
-SCHEMA_PATH = os.path.join(DB_DIR, "schema.sql")
+DEFAULT_DB_DIR = os.path.join(PROJECT_ROOT, "packages", "db")
+DEFAULT_DB_PATH = os.path.join(DEFAULT_DB_DIR, "smarthome.db")
+
+DB_PATH = os.getenv("SQLITE_DB_PATH", DEFAULT_DB_PATH)
+SCHEMA_PATH = os.path.join(DEFAULT_DB_DIR, "schema.sql")
 
 def get_db_connection():
     try:
@@ -24,8 +26,9 @@ def get_db_connection():
         return None
 
 def init_db():
-    if not os.path.exists(DB_DIR):
-        os.makedirs(DB_DIR)
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir)
         
     conn = get_db_connection()
     if conn:
