@@ -30,9 +30,11 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # Enable CORS for frontend communication
+# SECURITY: Restricted allow_origins from "*" to "http://localhost:3000" to prevent cross-site security issues.
+# In a multi-device or production setup, this should include all trusted origins.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, restrict this to specific domains
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
