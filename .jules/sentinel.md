@@ -1,0 +1,4 @@
+## 2026-02-12 - [SQL Injection in Dynamic Time Intervals and Insecure CORS]
+**Vulnerability:** Found multiple instances of SQL injection in `apps/api/database.py` where time intervals (hours/days) were being injected using f-strings into SQLite queries. Also found an insecure CORS configuration in `apps/api/main.py` where `allow_origins=["*"]` was used with `allow_credentials=True`.
+**Learning:** Even when variables are validated as integers by frameworks like FastAPI, using string interpolation for SQL queries is a security risk and violates the principle of using parameterized queries. Additionally, browsers block CORS requests with wildcard origins if credentials are enabled.
+**Prevention:** Always use parameterized queries (`?` in SQLite) for all variable inputs. For time intervals in SQLite, use string concatenation (`||`) to combine parameters with the interval unit safely. Ensure `allow_credentials` is `False` when using `allow_origins=["*"]`.
