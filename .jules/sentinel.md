@@ -1,0 +1,4 @@
+## 2026-02-12 - Parameterized SQLite Intervals and Secure CORS
+**Vulnerability:** SQL Injection and Overly Permissive CORS.
+**Learning:** SQLite queries using string interpolation for `datetime` intervals (e.g., `datetime('now', '-{hours} hours')`) are vulnerable to injection even if they seem like simple numeric substitutions. Malicious strings like `1 hours') OR 1=1 --` can bypass intended time filters. Additionally, setting `allow_credentials=True` with `allow_origins=["*"]` in FastAPI is an insecure configuration that is often blocked by modern browsers and violates security best practices.
+**Prevention:** Use parameterized queries with SQLite string concatenation for dynamic intervals: `datetime('now', '-' || ? || ' hours')`. Always set `allow_credentials=False` when using wildcard origins in CORS configuration.
