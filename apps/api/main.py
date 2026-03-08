@@ -33,7 +33,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], # In production, restrict this to specific domains
-    allow_credentials=True,
+    allow_credentials=False, # Set to False when allow_origins is ["*"] for security
     allow_methods=["*"],
     allow_headers=["*"],
 )
