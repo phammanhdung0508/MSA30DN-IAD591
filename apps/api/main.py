@@ -30,10 +30,12 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # Enable CORS for frontend communication
+# Security: allow_credentials=False is set because allow_origins=['*'].
+# Wildcard origins with credentials allowed is a security risk and disallowed by browsers.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], # In production, restrict this to specific domains
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
