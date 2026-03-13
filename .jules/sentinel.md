@@ -1,0 +1,4 @@
+## 2026-03-13 - Parameterizing Time Intervals in SQLite and Boundary Awareness
+**Vulnerability:** SQL injection was possible in analytics functions where time intervals (hours/days) were interpolated directly into `datetime()` function calls within SQL strings.
+**Learning:** Standard SQLite parameterization (`?`) cannot be placed directly inside a string literal argument of a function like `datetime('now', '-? hours')`. Instead, a safe pattern using SQLite's string concatenation operator is required: `datetime('now', '-' || ? || ' hours')`. Additionally, I learned that Sentinel's 50-line boundary applies strictly to all modifications, including auxiliary verification scripts; oversized scripts are rejected as technical debt.
+**Prevention:** Always use the `|| ? ||` concatenation pattern for dynamic intervals in SQLite. Ensure all security-related enhancements and supporting scripts are extremely concise to stay within project boundaries.
