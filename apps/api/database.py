@@ -177,8 +177,8 @@ def get_sensor_summary(device_id: str, hours: int = 24):
                 MAX(json_extract(payload, '$.co2')) as co2_max
             FROM device_data
             WHERE device_id = ?
-              AND timestamp >= datetime('now', '-{hours} hours')
-        ''', (device_id,))
+              AND timestamp >= datetime('now', '-' || ? || ' hours')
+        ''', (device_id, hours))
         row = cursor.fetchone()
         if not row:
             return None
@@ -227,10 +227,10 @@ def get_energy_analytics(device_id: str, days: int = 1):
                 MAX(json_extract(payload, '$.power')) as was_active
             FROM device_data
             WHERE device_id = ? 
-              AND timestamp >= datetime('now', '-{days} days')
+              AND timestamp >= datetime('now', '-' || ? || ' days')
             GROUP BY time_bucket
             ORDER BY time_bucket ASC
-        ''', (device_id,))
+        ''', (device_id, days))
         
         rows = cursor.fetchall()
         result = []
@@ -266,10 +266,10 @@ def get_temp_analytics(device_id: str, days: int = 1):
                 AVG(json_extract(payload, '$.temperature')) as avg_indoor
             FROM device_data
             WHERE device_id = ?
-              AND timestamp >= datetime('now', '-{days} days')
+              AND timestamp >= datetime('now', '-' || ? || ' days')
             GROUP BY time_bucket
             ORDER BY time_bucket ASC
-        ''', (device_id,))
+        ''', (device_id, days))
         
         rows = cursor.fetchall()
         result = []
