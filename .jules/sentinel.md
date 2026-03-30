@@ -1,0 +1,4 @@
+## 2026-03-30 - SQL Injection via f-string interpolation in SQLite datetime()
+**Vulnerability:** The functions `get_sensor_summary`, `get_energy_analytics`, and `get_temp_analytics` in `apps/api/database.py` were using f-strings to inject the `hours` and `days` parameters directly into the SQL query, specifically within the `datetime('now', '-{hours} hours')` function call.
+**Learning:** Even though the parameters were expected to be integers, passing them via f-strings allows for SQL injection if the input is not strictly validated as an integer before reaching the database layer. In SQLite, the correct way to parameterize such dynamic intervals is using the string concatenation operator `||` within the SQL itself.
+**Prevention:** Always use parameterized queries (using `?` placeholders) and never use f-strings or manual string formatting to build SQL queries. For dynamic intervals in SQLite, use `datetime('now', '-' || ? || ' hours')`.
