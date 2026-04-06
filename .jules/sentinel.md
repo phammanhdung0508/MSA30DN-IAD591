@@ -1,0 +1,4 @@
+## 2025-05-22 - SQL Injection in SQLite datetime() with Parameterized Intervals
+**Vulnerability:** SQL injection was possible in `apps/api/database.py` because time intervals (e.g., `hours`, `days`) were directly interpolated into SQL strings within the `datetime('now', '-{hours} hours')` function.
+**Learning:** Even if a variable seems like a simple integer, if it's interpolated into a SQL string, it can be exploited. In SQLite, you cannot parameterize the entire interval string directly (e.g., `? hours`), but you can use string concatenation within the SQL query itself to safely combine a parameter with a unit.
+**Prevention:** Always use parameterized queries. For SQLite `datetime()` or similar functions, use the `||` operator to concatenate the parameter: `datetime('now', '-' || ? || ' hours')`.
