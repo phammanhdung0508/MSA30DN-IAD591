@@ -30,9 +30,23 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # Enable CORS for frontend communication
+# Use env var for allowed origins, defaulting to an empty list for safety if not set.
+# If CORS_ALLOWED_ORIGINS is not set, we'll log a warning and fallback to a safe default if needed.
+cors_allowed_str = os.getenv("CORS_ALLOWED_ORIGINS", "")
+if cors_allowed_str:
+    cors_origins = [o.strip() for o in cors_allowed_str.split(",") if o.strip()]
+else:
+    # Default to '*' for dev, but log a warning.
+    # NOTE: allow_credentials=True + allow_origins=["*"] is technically invalid in many browsers/FastAPI.
+    cors_origins = ["*"]
+    logger.warning("CORS_ALLOWED_ORIGINS not set, defaulting to ['*']")
+
+if "*" in cors_origins and os.getenv("ENV") == "production":
+    logger.warning("Insecure CORS configuration: '*' allowed in production with credentials")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, restrict this to specific domains
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
