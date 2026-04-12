@@ -75,3 +75,4 @@ managed_components/
 sdkconfig.old
 
 apps/api/recordings/*.wav
+packages/db/*.db
