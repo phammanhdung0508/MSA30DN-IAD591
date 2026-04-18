@@ -1,0 +1,4 @@
+## 2026-04-18 - [SQL Injection in SQLite Time Intervals]
+**Vulnerability:** SQL injection in `get_sensor_summary`, `get_energy_analytics`, and `get_temp_analytics` within `apps/api/database.py`. The `hours` and `days` parameters were being directly interpolated into SQLite `datetime` functions using f-strings.
+**Learning:** Even if a parameter is expected to be an integer (as suggested by type hints), it must still be parameterized because Python does not enforce type hints at runtime, and f-strings bypass database-level protections.
+**Prevention:** Use standard SQL parameterization (`?`) even for function arguments within SQL. For relative time intervals in SQLite, use the string concatenation operator (`||`) to safely combine the interval value with the unit: `datetime('now', '-' || ? || ' hours')`.
