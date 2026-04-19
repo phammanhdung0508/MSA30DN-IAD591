@@ -1,6 +1,7 @@
 # Sơ đồ hệ thống (Mermaid)
 
 ## Tổng quan hệ thống
+
 ```mermaid
 flowchart LR
   ESP32[ESP32 Wake Word] -->|TCP Audio| API[FastAPI API]
@@ -12,6 +13,7 @@ flowchart LR
 ```
 
 ## Luồng Audio TCP
+
 ```mermaid
 sequenceDiagram
   participant ESP as ESP32-S3
@@ -34,6 +36,7 @@ sequenceDiagram
 ```
 
 ## MQTT Telemetry
+
 ```mermaid
 sequenceDiagram
   participant ESP as ESP32-S3
@@ -47,6 +50,7 @@ sequenceDiagram
 ```
 
 ## Database (Logical)
+
 ```mermaid
 erDiagram
   device_data {
@@ -88,6 +92,7 @@ erDiagram
 ```
 
 ## API Endpoints
+
 ```mermaid
 flowchart TB
   subgraph Chat
@@ -106,6 +111,7 @@ flowchart TB
 ```
 
 ## Đối Dây (ESP32-S3)
+
 ```mermaid
 flowchart LR
   ESP[ESP32-S3]
