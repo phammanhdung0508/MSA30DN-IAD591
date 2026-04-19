@@ -1,6 +1,6 @@
 // /*
 // "use client";
-// 
+//
 // import React from "react";
 // import {
 //     AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar
@@ -8,7 +8,7 @@
 // import { GlassCard } from "@/components/shared/GlassCard";
 // import { Zap, DollarSign, TrendingDown } from "lucide-react";
 // import { getEnergyAnalytics, getTempAnalytics } from "@/lib/api";
-// 
+//
 // const energyData = [
 //     { time: "00:00", active: 0.2, idle: 0.1 },
 //     { time: "04:00", active: 0.1, idle: 0.1 },
@@ -18,12 +18,12 @@
 //     { time: "20:00", active: 3.2, idle: 0.6 },
 //     { time: "23:59", active: 1.5, idle: 0.2 },
 // ];
-// 
+//
 // // Mock data removed
-// 
+//
 // export function AnalyticsView() {
 //     const [tempData, setTempData] = React.useState<any[]>([]);
-// 
+//
 //     React.useEffect(() => {
 //         const loadData = async () => {
 //             try {
@@ -37,14 +37,14 @@
 //         const interval = setInterval(loadData, 5000); // Update every 5s
 //         return () => clearInterval(interval);
 //     }, []);
-// 
+//
 //     return (
 //         <div className="space-y-6 h-full overflow-y-auto pb-8">
 //             <header>
 //                 <h1 className="text-3xl font-bold text-white">Analytics</h1>
 //                 <p className="text-slate-400 mt-1">Temperature reports</p>
 //             </header>
-// 
+//
 //             {/* Charts */}
 //             <div className="grid grid-cols-1 gap-6">
 //                 <GlassCard className="p-6 h-[500px]">
@@ -72,7 +72,7 @@
 //         </div>
 //     );
 // }
-// 
+//
 // // Sparkles icon override since it was used in layout but might not be imported here
 // function Sparkles({ className }: { className?: string }) {
 //     return (
@@ -82,12 +82,11 @@
 //     )
 // }
 // */
-// 
+//
 // export function AnalyticsView() {
 //     return null;
 // }
 
 export function AnalyticsView() {
-    return null;
+  return null;
 }
-
