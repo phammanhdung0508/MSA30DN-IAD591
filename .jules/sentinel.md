@@ -1,0 +1,4 @@
+## 2026-04-22 - SQL Injection in Analytics Functions
+**Vulnerability:** SQL injection vulnerabilities were found in `get_sensor_summary`, `get_energy_analytics`, and `get_temp_analytics` within `apps/api/database.py`. These functions used f-strings to inject the `hours` or `days` parameter directly into the SQLite `datetime()` function.
+**Learning:** Even "numeric" parameters like hours or days can be used for SQL injection if passed as strings without sanitization or parameterization. In SQLite, parameterizing values inside function calls like `datetime('now', '-? hours')` doesn't work directly; they must be concatenated using the `||` operator.
+**Prevention:** Always use parameterized queries. When dealing with dynamic intervals in SQLite, use string concatenation with placeholders: `datetime('now', '-' || ? || ' hours')`.
