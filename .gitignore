@@ -75,3 +75,6 @@ managed_components/
 sdkconfig.old
 
 apps/api/recordings/*.wav
+
+# Database
+packages/db/smarthome.db
