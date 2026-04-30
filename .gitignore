@@ -75,3 +75,7 @@ managed_components/
 sdkconfig.old
 
 apps/api/recordings/*.wav
+
+# Sensitive data
+apps/iot/key.txt
+packages/db/smarthome.db
