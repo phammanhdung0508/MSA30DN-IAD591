@@ -1,7 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List
+from pydantic import BaseModel, Field
+from typing import List, Annotated
 from mqtt_client import mqtt_client
 from database import (
     create_chat_session,
@@ -30,15 +30,21 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # Enable CORS for frontend communication
+# Security: Restricted allowed origins and disabled credentials for wildcard origins.
 allowed_origins = [
     origin.strip()
-    for origin in os.getenv("CORS_ALLOWED_ORIGINS", "*").split(",")
+    for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
     if origin.strip()
 ]
+allow_credentials = True
+if not allowed_origins or "*" in allowed_origins:
+    allowed_origins = ["*"]
+    allow_credentials = False
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -103,13 +109,13 @@ def _is_valid_schedule_grid(grid: List[List[bool]]) -> bool:
     return True
 
 class ChatSessionCreate(BaseModel):
-    session_id: str | None = None
-    source: str | None = None
+    session_id: Annotated[str | None, Field(max_length=64)] = None
+    source: Annotated[str | None, Field(max_length=64)] = None
 
 class ChatMessageRequest(BaseModel):
-    session_id: str | None = None
-    text: str
-    source: str | None = None
+    session_id: Annotated[str | None, Field(max_length=64)] = None
+    text: Annotated[str, Field(max_length=1000)]
+    source: Annotated[str | None, Field(max_length=64)] = None
 
 @app.on_event("startup")
 async def startup_event():
@@ -130,7 +136,10 @@ def create_chat_session_endpoint(data: ChatSessionCreate):
     return {"session_id": session_id}
 
 @app.get("/chat/session/{session_id}")
-def get_chat_session_history(session_id: str, limit: int = 200):
+def get_chat_session_history(
+    session_id: Annotated[str, Path(max_length=64)],
+    limit: Annotated[int, Query(ge=1, le=1000)] = 200
+):
     messages = get_chat_history(session_id, limit=limit)
     return {"session_id": session_id, "messages": messages}
 
@@ -166,7 +175,7 @@ def post_chat_message(req: ChatMessageRequest):
     }
 
 @app.get("/chat/last")
-def get_chat_last(session_id: str | None = None):
+def get_chat_last(session_id: Annotated[str | None, Query(max_length=64)] = None):
     sid = session_id or os.getenv("CHAT_DEFAULT_SESSION_ID", "device")
     messages = list(reversed(get_last_messages(sid, limit=4)))
     last_user = next((m for m in reversed(messages) if m["role"] == "user"), None)
@@ -188,7 +197,7 @@ def get_chat_status():
     }
 
 @app.get("/sensor/latest")
-def get_sensor_latest(device_id: str = "esp32-main"):
+def get_sensor_latest(device_id: Annotated[str, Query(max_length=64)] = "esp32-main"):
     data = get_latest_device_data(device_id)
     if not data:
         raise HTTPException(status_code=404, detail="No sensor data found")
@@ -209,16 +218,18 @@ def get_sensor_latest(device_id: str = "esp32-main"):
     return {"device_id": device_id, **data}
 
 @app.get("/sensor/history")
-def get_sensor_history(device_id: str = "esp32-main", limit: int = 100):
-    if limit <= 0 or limit > 1000:
-        raise HTTPException(status_code=400, detail="limit must be between 1 and 1000")
+def get_sensor_history(
+    device_id: Annotated[str, Query(max_length=64)] = "esp32-main",
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100
+):
     rows = get_device_data_history(device_id, limit=limit)
     return {"device_id": device_id, "count": len(rows), "items": rows}
 
 @app.get("/sensor/summary")
-def get_sensor_summary_endpoint(device_id: str = "esp32-main", hours: int = 24):
-    if hours <= 0 or hours > 168:
-        raise HTTPException(status_code=400, detail="hours must be between 1 and 168")
+def get_sensor_summary_endpoint(
+    device_id: Annotated[str, Query(max_length=64)] = "esp32-main",
+    hours: Annotated[int, Query(ge=1, le=168)] = 24
+):
     summary = get_sensor_summary(device_id, hours=hours)
     if summary is None:
         raise HTTPException(status_code=404, detail="No sensor data found")
