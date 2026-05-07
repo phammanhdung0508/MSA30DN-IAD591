@@ -129,6 +129,7 @@ def get_latest_sensor_with_values(device_id: str):
         conn.close()
 
 def get_device_data_history(device_id: str, limit: int = 100):
+    limit = max(1, min(1000, limit))
     conn = get_db_connection()
     if not conn:
         return []
@@ -159,6 +160,7 @@ def get_device_data_history(device_id: str, limit: int = 100):
         conn.close()
 
 def get_sensor_summary(device_id: str, hours: int = 24):
+    hours = max(1, min(168, hours))
     conn = get_db_connection()
     if not conn:
         return None
@@ -212,10 +214,11 @@ def get_energy_analytics(device_id: str, days: int = 1):
     """
     Returns aggregated power usage per hour for the last N days.
     """
+    days = max(1, min(30, days))
     conn = get_db_connection()
     if not conn:
         return []
-    
+
     try:
         cursor = conn.cursor()
         # SQLite json_extract might vary by version, but this is standard for recent ones.
@@ -254,10 +257,11 @@ def get_energy_analytics(device_id: str, days: int = 1):
         conn.close()
         
 def get_temp_analytics(device_id: str, days: int = 1):
+    days = max(1, min(30, days))
     conn = get_db_connection()
     if not conn:
         return []
-        
+
     try:
         cursor = conn.cursor()
         # Group by Hour for proper time trend
@@ -402,6 +406,7 @@ def add_chat_message(session_id: str, role: str, text: str, meta: dict | None = 
         conn.close()
 
 def get_chat_history(session_id: str, limit: int = 200):
+    limit = max(1, min(1000, limit))
     conn = get_db_connection()
     if not conn:
         return []
