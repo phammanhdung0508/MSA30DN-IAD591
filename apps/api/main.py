@@ -1,6 +1,6 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List
 from mqtt_client import mqtt_client
 from database import (
@@ -35,10 +35,14 @@ allowed_origins = [
     for origin in os.getenv("CORS_ALLOWED_ORIGINS", "*").split(",")
     if origin.strip()
 ]
+# allow_credentials=True is incompatible with allow_origins=["*"] in FastAPI
+# and poses a security risk if origins are not restricted.
+allow_credentials = "*" not in allowed_origins
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -103,13 +107,13 @@ def _is_valid_schedule_grid(grid: List[List[bool]]) -> bool:
     return True
 
 class ChatSessionCreate(BaseModel):
-    session_id: str | None = None
-    source: str | None = None
+    session_id: str | None = Field(None, max_length=64)
+    source: str | None = Field(None, max_length=64)
 
 class ChatMessageRequest(BaseModel):
-    session_id: str | None = None
-    text: str
-    source: str | None = None
+    session_id: str | None = Field(None, max_length=64)
+    text: str = Field(..., max_length=1000)
+    source: str | None = Field(None, max_length=64)
 
 @app.on_event("startup")
 async def startup_event():
@@ -130,7 +134,10 @@ def create_chat_session_endpoint(data: ChatSessionCreate):
     return {"session_id": session_id}
 
 @app.get("/chat/session/{session_id}")
-def get_chat_session_history(session_id: str, limit: int = 200):
+def get_chat_session_history(
+    session_id: str = Path(..., max_length=64),
+    limit: int = Query(200, ge=1, le=1000)
+):
     messages = get_chat_history(session_id, limit=limit)
     return {"session_id": session_id, "messages": messages}
 
@@ -209,16 +216,18 @@ def get_sensor_latest(device_id: str = "esp32-main"):
     return {"device_id": device_id, **data}
 
 @app.get("/sensor/history")
-def get_sensor_history(device_id: str = "esp32-main", limit: int = 100):
-    if limit <= 0 or limit > 1000:
-        raise HTTPException(status_code=400, detail="limit must be between 1 and 1000")
+def get_sensor_history(
+    device_id: str = Query("esp32-main", max_length=64),
+    limit: int = Query(100, ge=1, le=1000)
+):
     rows = get_device_data_history(device_id, limit=limit)
     return {"device_id": device_id, "count": len(rows), "items": rows}
 
 @app.get("/sensor/summary")
-def get_sensor_summary_endpoint(device_id: str = "esp32-main", hours: int = 24):
-    if hours <= 0 or hours > 168:
-        raise HTTPException(status_code=400, detail="hours must be between 1 and 168")
+def get_sensor_summary_endpoint(
+    device_id: str = Query("esp32-main", max_length=64),
+    hours: int = Query(24, ge=1, le=168)
+):
     summary = get_sensor_summary(device_id, hours=hours)
     if summary is None:
         raise HTTPException(status_code=404, detail="No sensor data found")
