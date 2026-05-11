@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List
 from mqtt_client import mqtt_client
 from database import (
@@ -35,10 +35,12 @@ allowed_origins = [
     for origin in os.getenv("CORS_ALLOWED_ORIGINS", "*").split(",")
     if origin.strip()
 ]
+# Credentials are NOT allowed if wildcard origin is used to prevent insecure configurations
+allow_credentials = "*" not in allowed_origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -103,13 +105,13 @@ def _is_valid_schedule_grid(grid: List[List[bool]]) -> bool:
     return True
 
 class ChatSessionCreate(BaseModel):
-    session_id: str | None = None
-    source: str | None = None
+    session_id: str | None = Field(None, max_length=64)
+    source: str | None = Field(None, max_length=64)
 
 class ChatMessageRequest(BaseModel):
-    session_id: str | None = None
-    text: str
-    source: str | None = None
+    session_id: str | None = Field(None, max_length=64)
+    text: str = Field(..., max_length=1000)
+    source: str | None = Field(None, max_length=64)
 
 @app.on_event("startup")
 async def startup_event():
@@ -131,6 +133,8 @@ def create_chat_session_endpoint(data: ChatSessionCreate):
 
 @app.get("/chat/session/{session_id}")
 def get_chat_session_history(session_id: str, limit: int = 200):
+    if limit <= 0 or limit > 1000:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 1000")
     messages = get_chat_history(session_id, limit=limit)
     return {"session_id": session_id, "messages": messages}
 
