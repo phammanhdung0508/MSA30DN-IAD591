@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List
 from mqtt_client import mqtt_client
 from database import (
@@ -35,10 +35,12 @@ allowed_origins = [
     for origin in os.getenv("CORS_ALLOWED_ORIGINS", "*").split(",")
     if origin.strip()
 ]
+# Security: If using wildcard origin, allow_credentials MUST be False
+allow_credentials = "*" not in allowed_origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -103,13 +105,13 @@ def _is_valid_schedule_grid(grid: List[List[bool]]) -> bool:
     return True
 
 class ChatSessionCreate(BaseModel):
-    session_id: str | None = None
-    source: str | None = None
+    session_id: str | None = Field(None, max_length=64)
+    source: str | None = Field(None, max_length=64)
 
 class ChatMessageRequest(BaseModel):
-    session_id: str | None = None
-    text: str
-    source: str | None = None
+    session_id: str | None = Field(None, max_length=64)
+    text: str = Field(..., max_length=1000)
+    source: str | None = Field(None, max_length=64)
 
 @app.on_event("startup")
 async def startup_event():
