@@ -35,10 +35,16 @@ allowed_origins = [
     for origin in os.getenv("CORS_ALLOWED_ORIGINS", "*").split(",")
     if origin.strip()
 ]
+
+# Security: allow_credentials=True cannot be used with wildcard (*) origins
+allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
+if "*" in allowed_origins:
+    allow_credentials = False
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
